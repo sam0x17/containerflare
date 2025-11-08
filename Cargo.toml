@@ -1,0 +1,9 @@
+[package]
+name = "containerflare"
+authors = ["sam0x17"]
+license = "MIT"
+description = "A runtime for writing Rust-based Cloudflare Workers running in the Cloudflare Workers container runtime"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
