@@ -24,7 +24,7 @@ pub async fn serve(router: Router, config: RuntimeConfig) -> Result<()> {
     let listener = TcpListener::bind(config.bind_addr).await?;
     tracing::info!(addr = %config.bind_addr, "containerflare listening");
 
-    let command_client = CommandClient::new(config.command_endpoint.clone());
+    let command_client = CommandClient::connect(config.command_endpoint.clone()).await?;
     let router = router.layer(Extension(command_client));
     let service = router.into_make_service();
 
@@ -34,6 +34,11 @@ pub async fn serve(router: Router, config: RuntimeConfig) -> Result<()> {
         .await?;
 
     Ok(())
+}
+
+pub async fn run(router: Router) -> Result<()> {
+    let config = RuntimeConfig::from_env()?;
+    serve(router, config).await
 }
 
 async fn shutdown_signal() {

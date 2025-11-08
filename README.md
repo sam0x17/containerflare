@@ -4,7 +4,7 @@ Rust runtime helpers for building Cloudflare Containers Workers with Axum. The c
 
 ## Status
 - Architecture + scaffolding in place (`RuntimeConfig`, `ContainerContext`, `ContainerflareRuntime`).
-- Command channel is a stub that logs attempts; future work will add the JSON-over-STDIO transport Cloudflare exposes.
+- `CommandClient` now supports JSON-over-STDIO (default) plus TCP/Unix sockets for local dev proxies, with configurable timeouts.
 
 See `ARCHITECTURE.md` for the full iteration plan.
 
@@ -22,13 +22,13 @@ If you need glibc, you can swap Alpine for a Debian/Ubuntu base image and target
 ## Quick start
 ```rust
 use axum::{routing::get, Router};
-use containerflare::{serve, RuntimeConfig};
+use containerflare::run;
 
 #[tokio::main]
 async fn main() -> containerflare::Result<()> {
     let router = Router::new().route("/", get(|| async { "ok" }));
-    serve(router, RuntimeConfig::from_env()?).await
+    run(router).await
 }
 ```
 
-Run the binary inside your container image. Cloudflare will proxy requests from the worker/DO into the Axum listener bound by `containerflare` (defaults to `127.0.0.1:8787`).
+Run the binary inside your container image. Cloudflare will proxy requests from the worker/DO into the Axum listener bound by `containerflare` (defaults to `127.0.0.1:8787`). Use `CF_CMD_ENDPOINT` to point the command client at a different IPC channel (for example `tcp://127.0.0.1:9000` when testing against a local shim).

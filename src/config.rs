@@ -123,3 +123,64 @@ pub enum ConfigError {
     #[error("invalid command endpoint: {0}")]
     InvalidCommandEndpoint(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(unix)]
+    use std::path::PathBuf;
+
+    #[test]
+    fn builder_overrides_defaults() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8)), 9999);
+        let config = RuntimeConfig::builder()
+            .bind_addr(addr)
+            .command_endpoint(CommandEndpoint::Tcp("127.0.0.1:9998".into()))
+            .build();
+
+        assert_eq!(config.bind_addr, addr);
+        assert!(matches!(config.command_endpoint, CommandEndpoint::Tcp(_)));
+    }
+
+    #[test]
+    fn parses_command_endpoint_strings() {
+        assert!(matches!(
+            "stdio".parse::<CommandEndpoint>(),
+            Ok(CommandEndpoint::Stdio)
+        ));
+        assert!(matches!(
+            "tcp://127.0.0.1:1111".parse::<CommandEndpoint>(),
+            Ok(CommandEndpoint::Tcp(addr)) if addr == "127.0.0.1:1111"
+        ));
+
+        #[cfg(unix)]
+        {
+            let endpoint = "unix:///tmp/socket".parse::<CommandEndpoint>();
+            assert!(
+                matches!(endpoint, Ok(CommandEndpoint::UnixSocket(path)) if path == PathBuf::from("/tmp/socket"))
+            );
+        }
+    }
+
+    #[test]
+    fn reads_env_configuration() {
+        unsafe {
+            std::env::set_var("CF_CONTAINER_PORT", "9000");
+            std::env::set_var("CF_CONTAINER_ADDR", "127.0.0.2");
+            std::env::set_var("CF_CMD_ENDPOINT", "tcp://127.0.0.1:7878");
+        }
+
+        let config = RuntimeConfig::from_env().expect("config");
+        assert_eq!(
+            config.bind_addr,
+            SocketAddr::new("127.0.0.2".parse().unwrap(), 9000)
+        );
+        assert!(matches!(config.command_endpoint, CommandEndpoint::Tcp(_)));
+
+        unsafe {
+            std::env::remove_var("CF_CONTAINER_PORT");
+            std::env::remove_var("CF_CONTAINER_ADDR");
+            std::env::remove_var("CF_CMD_ENDPOINT");
+        }
+    }
+}

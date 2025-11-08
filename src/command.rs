@@ -1,9 +1,26 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
+use tokio::io::{self, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::sync::Mutex;
+use tokio::time;
+
+#[cfg(unix)]
+use tokio::net::UnixStream;
+use tokio::net::{
+    TcpStream, tcp::OwnedReadHalf as TcpOwnedReadHalf, tcp::OwnedWriteHalf as TcpOwnedWriteHalf,
+};
+#[cfg(unix)]
+use tokio::net::{
+    unix::OwnedReadHalf as UnixOwnedReadHalf, unix::OwnedWriteHalf as UnixOwnedWriteHalf,
+};
 
 use crate::config::CommandEndpoint;
+
+const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug)]
 pub struct CommandClient {
@@ -13,13 +30,52 @@ pub struct CommandClient {
 #[derive(Debug)]
 struct CommandClientInner {
     endpoint: CommandEndpoint,
+    writer: CommandWriter,
+    reader: CommandReader,
+    timeout: Duration,
 }
 
 impl CommandClient {
-    pub fn new(endpoint: CommandEndpoint) -> Self {
-        Self {
-            inner: Arc::new(CommandClientInner { endpoint }),
-        }
+    pub async fn connect(endpoint: CommandEndpoint) -> Result<Self, CommandError> {
+        Self::connect_with_timeout(endpoint, DEFAULT_COMMAND_TIMEOUT).await
+    }
+
+    pub async fn connect_with_timeout(
+        endpoint: CommandEndpoint,
+        timeout: Duration,
+    ) -> Result<Self, CommandError> {
+        let (writer, reader) = match &endpoint {
+            CommandEndpoint::Stdio => (
+                CommandWriter::Stdio(Mutex::new(tokio::io::stdout())),
+                CommandReader::Stdio(Mutex::new(BufReader::new(tokio::io::stdin()))),
+            ),
+            CommandEndpoint::Tcp(addr) => {
+                let stream = TcpStream::connect(addr).await?;
+                let (read_half, write_half) = stream.into_split();
+                (
+                    CommandWriter::Tcp(Mutex::new(write_half)),
+                    CommandReader::Tcp(Mutex::new(BufReader::new(read_half))),
+                )
+            }
+            #[cfg(unix)]
+            CommandEndpoint::UnixSocket(path) => {
+                let stream = UnixStream::connect(path).await?;
+                let (read_half, write_half) = stream.into_split();
+                (
+                    CommandWriter::Unix(Mutex::new(write_half)),
+                    CommandReader::Unix(Mutex::new(BufReader::new(read_half))),
+                )
+            }
+        };
+
+        Ok(Self {
+            inner: Arc::new(CommandClientInner {
+                endpoint,
+                writer,
+                reader,
+                timeout,
+            }),
+        })
     }
 
     pub fn endpoint(&self) -> &CommandEndpoint {
@@ -27,15 +83,26 @@ impl CommandClient {
     }
 
     pub async fn send(&self, request: CommandRequest) -> Result<CommandResponse, CommandError> {
-        tracing::warn!(
-            command = %request.command,
-            "command transport is not wired up yet; returning unsupported error"
-        );
+        self.inner.writer.send(&request).await?;
 
-        Err(CommandError::TransportNotReady(format!(
-            "transport {:?} is not implemented yet",
-            self.inner.endpoint
-        )))
+        let response = time::timeout(self.inner.timeout, self.inner.reader.read()).await;
+        let response = match response {
+            Ok(result) => result?,
+            Err(_) => return Err(CommandError::Timeout(self.inner.timeout)),
+        };
+
+        if response.ok {
+            Ok(response)
+        } else {
+            let diagnostic = response
+                .diagnostic
+                .clone()
+                .unwrap_or_else(|| "host returned failure".to_owned());
+            Err(CommandError::CommandFailure {
+                diagnostic,
+                payload: response.payload.clone(),
+            })
+        }
     }
 }
 
@@ -52,6 +119,10 @@ impl CommandRequest {
             command: command.into(),
             payload,
         }
+    }
+
+    pub fn empty(command: impl Into<String>) -> Self {
+        Self::new(command, serde_json::Value::Null)
     }
 }
 
@@ -76,8 +147,78 @@ impl CommandResponse {
 
 #[derive(Debug, Error)]
 pub enum CommandError {
-    #[error("command transport not available: {0}")]
-    TransportNotReady(String),
-    #[error("command failed: {0}")]
-    CommandFailure(String),
+    #[error("command failed: {diagnostic}")]
+    CommandFailure { diagnostic: String, payload: Value },
+    #[error("command transport closed")]
+    TransportClosed,
+    #[error("command timed out after {0:?}")]
+    Timeout(Duration),
+    #[error("io error: {0}")]
+    Io(#[from] io::Error),
+    #[error("invalid command payload: {0}")]
+    Serialization(#[from] serde_json::Error),
+}
+
+#[derive(Debug)]
+enum CommandWriter {
+    Stdio(Mutex<tokio::io::Stdout>),
+    Tcp(Mutex<TcpOwnedWriteHalf>),
+    #[cfg(unix)]
+    Unix(Mutex<UnixOwnedWriteHalf>),
+}
+
+#[derive(Debug)]
+enum CommandReader {
+    Stdio(Mutex<BufReader<tokio::io::Stdin>>),
+    Tcp(Mutex<BufReader<TcpOwnedReadHalf>>),
+    #[cfg(unix)]
+    Unix(Mutex<BufReader<UnixOwnedReadHalf>>),
+}
+
+impl CommandWriter {
+    async fn send(&self, request: &CommandRequest) -> Result<(), CommandError> {
+        let line = serde_json::to_string(request)?;
+        match self {
+            CommandWriter::Stdio(writer) => Self::write_line(writer, &line).await,
+            CommandWriter::Tcp(writer) => Self::write_line(writer, &line).await,
+            #[cfg(unix)]
+            CommandWriter::Unix(writer) => Self::write_line(writer, &line).await,
+        }
+    }
+
+    async fn write_line<W>(writer: &Mutex<W>, line: &str) -> Result<(), CommandError>
+    where
+        W: AsyncWrite + Unpin + Send,
+    {
+        let mut guard = writer.lock().await;
+        guard.write_all(line.as_bytes()).await?;
+        guard.write_all(b"\n").await?;
+        guard.flush().await?;
+        Ok(())
+    }
+}
+
+impl CommandReader {
+    async fn read(&self) -> Result<CommandResponse, CommandError> {
+        match self {
+            CommandReader::Stdio(reader) => Self::read_line(reader).await,
+            CommandReader::Tcp(reader) => Self::read_line(reader).await,
+            #[cfg(unix)]
+            CommandReader::Unix(reader) => Self::read_line(reader).await,
+        }
+    }
+
+    async fn read_line<R>(reader: &Mutex<BufReader<R>>) -> Result<CommandResponse, CommandError>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        let mut guard = reader.lock().await;
+        let mut buf = String::new();
+        let read = guard.read_line(&mut buf).await?;
+        if read == 0 {
+            return Err(CommandError::TransportClosed);
+        }
+        let response = serde_json::from_str(&buf)?;
+        Ok(response)
+    }
 }

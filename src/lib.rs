@@ -14,4 +14,4 @@ pub use crate::command::{CommandClient, CommandError, CommandRequest, CommandRes
 pub use crate::config::{CommandEndpoint, RuntimeConfig, RuntimeConfigBuilder};
 pub use crate::context::{ContainerContext, RequestMetadata};
 pub use crate::error::{ContainerflareError, Result};
-pub use crate::runtime::{ContainerflareRuntime, serve};
+pub use crate::runtime::{ContainerflareRuntime, run, serve};

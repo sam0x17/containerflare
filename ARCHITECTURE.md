@@ -52,9 +52,9 @@
 4. Responses travel back through Axum/Hyper, and the worker container proxies them to the edge client.
 
 ## Host Command Channel
-- Transport: JSON lines over stdin/stdout for MVP. The Cloudflare container runtime already sends structured events through stdin; we mirror the protocol.
-- `CommandClient` ensures framing, correlation ids, retries on disconnected pipes, and surfacing `CommandError` variants for host errors.
-- Future extension: feature flag `cmd-unix-socket` for faster local dev.
+- Transport: JSON lines over stdin/stdout for MVP (implemented). Local testing can swap to TCP or Unix sockets by setting `CF_CMD_ENDPOINT`.
+- `CommandClient` serializes commands sequentially with flush/timeout guarantees and surfaces structured errors; follow-up work will add true multiplexing with per-command IDs once Cloudflare documents the protocol.
+- Future extension: feature-flagged advanced transports (shared memory, Unix sockets on Windows Subsystem for Linux, etc.) for faster local dev.
 
 ## Deployment & Runtime Concerns
 - Binary targets must be statically linked with musl (`x86_64-unknown-linux-musl`), matching Cloudflare's "containers should be built for the `linux/amd64` architecture" guidance (`cloudflare-docs/src/content/docs/containers/platform-details/architecture.mdx:79`); crate exposes `bin` example as reference.
@@ -68,8 +68,8 @@
 4. Expand command coverage + typed helpers before 0.2.0.
 
 ## Immediate TODOs
-- Flesh out `CommandClient` transports (at least JSON-over-STDIO) plus retry/backoff semantics.
-- Provide `containerflare::main` helper macro to hide `tokio::main` and config bootstrap boilerplate.
-- Create `examples/basic` showing Axum routes, `ContainerContext` extractor usage, and fake command responses for local dev.
+- Provide a `containerflare::main` (or attribute macro) that wraps `tokio::main` and `RuntimeConfig::from_env`, so users do not need to call `run` manually.
+- Flesh out the command protocol contract once Cloudflare publishes it: add request IDs + concurrent in-flight handling, plus retries/backoff for transient pipe failures.
+- Enhance `examples/basic` (or add a second example) to demonstrate issuing a host command via `ContainerContext::invoke` with a mocked transport.
 - Add tracing subscriber defaults suitable for Alpine (e.g., emit JSON logs gated by `RUST_LOG`).
-- Write smoke tests for `RuntimeConfig::from_env` and `ContainerContext` header parsing to guard future refactors.
+- Extend the test suite with coverage for `ContainerContext::from_request_parts` and integration tests that exercise the Axum server end-to-end via `hyper`.
