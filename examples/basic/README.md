@@ -12,7 +12,7 @@ cargo run -p containerflare-basic-example
 docker build --platform=linux/amd64 -f examples/basic/Dockerfile -t containerflare-basic .
 # run the amd64 image under qemu (if host != amd64)
 docker run --rm --platform=linux/amd64 -p 8787:8787 containerflare-basic
-curl http://127.0.0.1:8787/
+curl http://127.0.0.1:8787/      # returns the forwarded RequestMetadata JSON
 ```
 
 `containerflare` binds to `0.0.0.0:8787` by default, so Cloudflare's sidecar (and your local Docker host) can reach the Axum listener without any extra env vars. Set `CF_CONTAINER_ADDR` or `CF_CONTAINER_PORT` if you need a custom binding.
@@ -50,3 +50,6 @@ npx wrangler containers logs --name containerflare-basic-containerflarebasic
 ```
 
 When you're done, `npx wrangler deployments list` shows previous versions and `npx wrangler delete` tears everything down.
+
+## Metadata From Workers
+`containerflare` expects Cloudflare-specific request details in the `x-containerflare-metadata` header. The provided Worker populates it (see `worker/index.js`) with the request ID, colo/region/country, client IP, worker name (`CONTAINERFLARE_WORKER` from `wrangler.toml`), and the full URL/method before proxying the request into the container. Inside Rust handlers you can read those values via `ContainerContext::metadata()`. If you adjust the Worker, keep writing this header so your Axum code retains access to Cloudflare context.

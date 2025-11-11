@@ -36,7 +36,7 @@
   - Parses config from env (e.g., `CF_CONTAINER_PORT`, `CF_CMD_SOCKET`, `CF_ENV_*`).
   - Allows override via builder for unit tests.
 - `containerflare::context`
-  - Defines `ContainerContext` struct containing request metadata + `CommandClient` handle.
+  - Defines `ContainerContext` struct containing request metadata + `CommandClient` handle. Metadata is populated from the Worker-supplied `x-containerflare-metadata` header (request id, colo/region/country, client IP, etc.) with HTTP header fallbacks for local testing.
   - Implements `FromRequestParts` for easy injection into Axum handlers.
 - `containerflare::command`
   - Owns the low-level IPC transport (stdin/stdout framing while sockets are not GA yet).

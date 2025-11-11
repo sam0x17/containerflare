@@ -24,7 +24,7 @@ docker build --platform=linux/amd64 -f examples/basic/Dockerfile .
 Smoke test the image:
 ```bash
 docker run --rm --platform=linux/amd64 -p 8787:8787 containerflare-basic
-curl http://127.0.0.1:8787/
+curl http://127.0.0.1:8787/           # entire RequestMetadata payload
 ```
 
 Deploy via Cloudflare Containers by running `npm install` inside `examples/basic` (installs Wrangler v4) and executing `npx wrangler deploy` after logging in with `npx wrangler login` or setting `CLOUDFLARE_API_TOKEN`. The example’s `wrangler.toml` sets `image_build_context = "../.."` so Docker sees the whole workspace (see `examples/basic/README.md` for the full flow).
@@ -41,6 +41,9 @@ npx wrangler containers logs --name containerflare-basic-containerflarebasic
 # Hit the deployed Worker route printed by wrangler deploy
 curl https://containerflare-basic.<your-account>.workers.dev/
 ```
+
+## Metadata bridge
+The Worker shim adds an `x-containerflare-metadata` header before proxying each request into the container. That JSON payload contains the request ID (`cf-ray`), colo/region, country, client IP, worker name (set via the `CONTAINERFLARE_WORKER` var in `wrangler.toml`), and the full URL/method. On the Rust side you can read those fields via `ContainerContext::metadata()` (see `RequestMetadata` in `src/context.rs`). If you customize the Worker, keep forwarding that header so handlers continue to receive Cloudflare-specific context.
 
 ## Target triple & container expectations
 Cloudflare’s official Containers docs state that “containers should be built for the `linux/amd64` architecture” (`cloudflare-docs/src/content/docs/containers/platform-details/architecture.mdx:79`).

@@ -4,6 +4,9 @@ compatibility_date = "2025-01-30"
 workers_dev = true
 preview_urls = true
 
+[vars]
+CONTAINERFLARE_WORKER = "containerflare-basic"
+
 [[containers]]
 class_name = "ContainerflareBasic"
 image = "./Dockerfile"

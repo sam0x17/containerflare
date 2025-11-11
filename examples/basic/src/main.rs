@@ -3,17 +3,11 @@ use containerflare::{ContainerContext, RequestMetadata, run};
 
 #[tokio::main]
 async fn main() -> containerflare::Result<()> {
-    let router = Router::new()
-        .route("/", get(health))
-        .route("/metadata", get(metadata));
+    let router = Router::new().route("/", get(metadata));
 
     run(router).await
 }
 
-async fn health() -> &'static str {
-    "ok"
-}
-
-async fn metadata(context: ContainerContext) -> Json<RequestMetadata> {
-    Json(context.metadata().clone())
+async fn metadata(context: ContainerContext) -> Json<(&'static str, RequestMetadata)> {
+    Json(("it works!", context.metadata().clone()))
 }
