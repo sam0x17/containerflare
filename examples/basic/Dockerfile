@@ -27,6 +27,7 @@ COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/containerflare
 
 EXPOSE 8787
 USER containerflare
-ENV RUST_LOG=info
+ENV RUST_LOG=info \
+    CF_CONTAINER_ADDR=0.0.0.0
 
 CMD ["/usr/local/bin/containerflare-basic"]

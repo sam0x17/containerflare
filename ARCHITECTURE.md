@@ -30,7 +30,7 @@
 ## Modules & Responsibilities
 - `containerflare::runtime`
   - Provides `Runtime::new(Config) -> Runtime` and `Runtime::serve(router)`.
-  - Handles async executor setup (tokio) and Axum server binding (listens on 127.0.0.1:8787 by default; Cloudflare sidecar proxies HTTP traffic here).
+  - Handles async executor setup (tokio) and Axum server binding (listens on 0.0.0.0:8787 by default; Cloudflare sidecar proxies HTTP traffic here).
   - Manages graceful shutdown (SIGTERM/SIGINT) triggered by host container.
 - `containerflare::config`
   - Parses config from env (e.g., `CF_CONTAINER_PORT`, `CF_CMD_SOCKET`, `CF_ENV_*`).

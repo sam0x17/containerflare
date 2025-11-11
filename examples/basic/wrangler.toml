@@ -5,6 +5,7 @@ compatibility_date = "2025-01-30"
 [[containers]]
 class_name = "ContainerflareBasic"
 image = "./Dockerfile"
+image_build_context = "../.."
 max_instances = 5
 
 [[durable_objects.bindings]]

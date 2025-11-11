@@ -22,7 +22,7 @@ impl RuntimeConfig {
         let addr = env::var("CF_CONTAINER_ADDR")
             .ok()
             .and_then(|value| value.parse::<IpAddr>().ok())
-            .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
+            .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
 
         let bind_addr = SocketAddr::new(addr, port);
 
@@ -47,7 +47,7 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         // Default matches the local Cloudflare containers sidecar contract.
         Self {
-            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8787),
+            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 8787),
             command_endpoint: CommandEndpoint::Stdio,
         }
     }
@@ -110,7 +110,7 @@ impl RuntimeConfigBuilder {
         RuntimeConfig {
             bind_addr: self
                 .bind_addr
-                .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8787)),
+                .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 8787)),
             command_endpoint: self
                 .command_endpoint
                 .unwrap_or_else(CommandEndpoint::default),

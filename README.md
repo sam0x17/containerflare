@@ -23,11 +23,11 @@ docker build --platform=linux/amd64 -f examples/basic/Dockerfile .
 
 Smoke test the image:
 ```bash
-docker run --rm --platform=linux/amd64 -e CF_CONTAINER_ADDR=0.0.0.0 -p 8787:8787 containerflare-basic
+docker run --rm --platform=linux/amd64 -p 8787:8787 containerflare-basic
 curl http://127.0.0.1:8787/
 ```
 
-Deploy via Cloudflare Containers by running `npm install` inside `examples/basic` and executing `npx wrangler deploy` (see `examples/basic/README.md` for the full flow).
+Deploy via Cloudflare Containers by running `npm install` inside `examples/basic` (installs Wrangler v4) and executing `npx wrangler deploy` after logging in with `npx wrangler login` or setting `CLOUDFLARE_API_TOKEN`. The example’s `wrangler.toml` sets `image_build_context = "../.."` so Docker sees the whole workspace (see `examples/basic/README.md` for the full flow).
 
 ## Target triple & container expectations
 Cloudflare’s official Containers docs state that “containers should be built for the `linux/amd64` architecture” (`cloudflare-docs/src/content/docs/containers/platform-details/architecture.mdx:79`).
@@ -37,6 +37,8 @@ To match that requirement we build binaries for `x86_64-unknown-linux-musl` and 
 ```bash
 cargo build --release --target x86_64-unknown-linux-musl
 ```
+
+The runtime now binds to `0.0.0.0:8787` by default so Cloudflare’s sidecar (which connects from `10.0.0.1`) can reach the Axum server without extra configuration. Override `CF_CONTAINER_ADDR`/`CF_CONTAINER_PORT` if you need a different address or port locally.
 
 If you need glibc, you can swap Alpine for a Debian/Ubuntu base image and target `x86_64-unknown-linux-gnu`, but the runtime must still be packaged as an amd64 container image.
 
@@ -52,4 +54,4 @@ async fn main() -> containerflare::Result<()> {
 }
 ```
 
-Run the binary inside your container image. Cloudflare will proxy requests from the worker/DO into the Axum listener bound by `containerflare` (defaults to `127.0.0.1:8787`). Use `CF_CMD_ENDPOINT` to point the command client at a different IPC channel (for example `tcp://127.0.0.1:9000` when testing against a local shim).
+Run the binary inside your container image. Cloudflare will proxy requests from the worker/DO into the Axum listener bound by `containerflare` (defaults to `0.0.0.0:8787`). Use `CF_CMD_ENDPOINT` to point the command client at a different IPC channel (for example `tcp://127.0.0.1:9000` when testing against a local shim).
