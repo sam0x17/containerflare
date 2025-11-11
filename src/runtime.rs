@@ -6,20 +6,24 @@ use crate::command::CommandClient;
 use crate::config::RuntimeConfig;
 use crate::error::Result;
 
+/// High-level runtime that wires an Axum router into Cloudflare's container environment.
 pub struct ContainerflareRuntime {
     config: RuntimeConfig,
 }
 
 impl ContainerflareRuntime {
+    /// Creates a runtime with the provided configuration.
     pub fn new(config: RuntimeConfig) -> Self {
         Self { config }
     }
 
+    /// Consumes the runtime and starts serving the supplied router.
     pub async fn serve(self, router: Router) -> Result<()> {
         serve(router, self.config).await
     }
 }
 
+/// Serves the router with the provided configuration.
 pub async fn serve(router: Router, config: RuntimeConfig) -> Result<()> {
     let listener = TcpListener::bind(config.bind_addr).await?;
     tracing::info!(addr = %config.bind_addr, "containerflare listening");
@@ -36,6 +40,7 @@ pub async fn serve(router: Router, config: RuntimeConfig) -> Result<()> {
     Ok(())
 }
 
+/// Loads [`RuntimeConfig`] from the environment and starts serving the router.
 pub async fn run(router: Router) -> Result<()> {
     let config = RuntimeConfig::from_env()?;
     serve(router, config).await

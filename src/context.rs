@@ -8,8 +8,10 @@ use thiserror::Error;
 
 use crate::command::{CommandClient, CommandError, CommandRequest, CommandResponse};
 
+/// Header set by the Worker shim that carries Cloudflare-specific request metadata.
 const METADATA_HEADER: &str = "x-containerflare-metadata";
 
+/// Request-scoped handle that exposes Cloudflare request metadata plus the host command client.
 #[derive(Clone, Debug)]
 pub struct ContainerContext {
     metadata: RequestMetadata,
@@ -17,19 +19,23 @@ pub struct ContainerContext {
 }
 
 impl ContainerContext {
+    /// Returns the request metadata parsed from Cloudflare headers.
     pub fn metadata(&self) -> &RequestMetadata {
         &self.metadata
     }
 
+    /// Returns the low-level command client for host-managed capabilities.
     pub fn command_client(&self) -> &CommandClient {
         &self.command_client
     }
 
+    /// Issues an IPC command over the host-managed channel.
     pub async fn invoke(&self, request: CommandRequest) -> Result<CommandResponse, CommandError> {
         self.command_client.send(request).await
     }
 }
 
+/// Cloudflare metadata forwarded by the Worker shim.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RequestMetadata {
@@ -65,6 +71,7 @@ impl Default for RequestMetadata {
 }
 
 impl RequestMetadata {
+    /// Builds metadata from either the shim header or fallbacks for local testing.
     fn from_parts(parts: &Parts) -> Self {
         if let Some(metadata) = Self::from_metadata_header(parts) {
             return metadata;
@@ -127,6 +134,7 @@ impl RequestMetadata {
     }
 }
 
+/// Errors emitted when a handler requests [`ContainerContext`] but extensions were not set up.
 #[derive(Debug, Error)]
 pub enum ContainerContextRejection {
     #[error("command client missing from request extensions")]

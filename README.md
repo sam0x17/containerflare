@@ -1,73 +1,130 @@
 # containerflare
 
-Rust runtime helpers for building Cloudflare Containers Workers with Axum. The crate wires up an Axum router inside the Containers runtime, injects Cloudflare request metadata, and provides a command channel stub for reaching host-managed capabilities (KV, D1, queues, etc.).
+[![Crates.io](https://img.shields.io/crates/v/containerflare.svg)](https://crates.io/crates/containerflare)
+[![Docs](https://docs.rs/containerflare/badge.svg)](https://docs.rs/containerflare)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Status
-- Architecture + scaffolding in place (`RuntimeConfig`, `ContainerContext`, `ContainerflareRuntime`).
-- `CommandClient` now supports JSON-over-STDIO (default) plus TCP/Unix sockets for local dev proxies, with configurable timeouts.
+`containerflare` lets you run Axum inside [Cloudflare Containers](https://developers.cloudflare.com/containers) without re-implementing the platform glue. It exposes a tiny runtime that:
 
-See `ARCHITECTURE.md` for the full iteration plan.
+- boots an Axum router on the container’s loopback listener
+- forwards Cloudflare request metadata into your handlers
+- keeps a command channel open so you can reach host-managed capabilities (KV, D1, Queues,
+  etc.)
 
-## Examples
-`examples/basic` hosts a standalone Axum crate (it depends on this repo via `path = "../.."`) plus its container + Worker scaffolding. Building requires Rust 1.84+ (edition 2024).
+The result feels like developing any other Axum app—only now it runs next to your Worker.
 
-Run it directly without containers:
+## Highlights
+
+- **Axum-first runtime** – bring your own router, tower layers, extractors, etc.
+- **Cloudflare metadata bridge** – request ID, colo/region/country, client IP, worker name, and
+  URLs are injected via `ContainerContext`.
+- **Command channel client** – talk JSON-over-STDIO (default), TCP, or Unix sockets to the host
+  when Cloudflare publishes more capabilities.
+- **Production-ready example** – `examples/basic` demonstrates a full Worker + Durable Object +
+  container deployment using Wrangler v4.
+
+## Installation
+
 ```bash
-cargo run -p containerflare-basic-example
+cargo add containerflare
 ```
 
-Build the container locally:
-```bash
-docker build --platform=linux/amd64 -f examples/basic/Dockerfile .
+The crate targets Rust 1.90+ (edition 2024).
+
+## Quick start
+
+```rust
+use axum::{routing::get, Json, Router};
+use containerflare::{run, ContainerContext, RequestMetadata};
+
+#[tokio::main]
+async fn main() -> containerflare::Result<()> {
+    let router = Router::new().route("/", get(metadata));
+    run(router).await
+}
+
+async fn metadata(ctx: ContainerContext) -> Json<RequestMetadata> {
+    Json(ctx.metadata().clone())
+}
 ```
 
-Smoke test the image:
+- `ContainerContext` is injected via Axum’s extractor system.
+- `RequestMetadata` contains everything Cloudflare knows about the request (worker name, colo,
+  region, `cf-ray`, client IP, method/path/url, etc.).
+- `ContainerContext::command_client()` provides the low-level JSON command channel; call
+  `invoke` whenever Cloudflare documents a capability.
+
+Run the binary inside your container image. Cloudflare will proxy HTTP traffic from the
+Worker/Durable Object to the listener bound by `containerflare` (defaults to `0.0.0.0:8787`).
+Override `CF_CONTAINER_ADDR`/`CF_CONTAINER_PORT` if you need something else locally. Use
+`CF_CMD_ENDPOINT` when pointing the command client at a TCP or Unix socket shim.
+
+## Running locally
+
 ```bash
+# build and run the example container (amd64)
+docker build --platform=linux/amd64 -f examples/basic/Dockerfile -t containerflare-basic .
 docker run --rm --platform=linux/amd64 -p 8787:8787 containerflare-basic
-curl http://127.0.0.1:8787/           # entire RequestMetadata payload
+
+# curl echoes the RequestMetadata JSON – easy proof the bridge works
+curl http://127.0.0.1:8787/
 ```
 
-Deploy via Cloudflare Containers by running `npm install` inside `examples/basic` (installs Wrangler v4) and executing `npx wrangler deploy` after logging in with `npx wrangler login` or setting `CLOUDFLARE_API_TOKEN`. The example’s `wrangler.toml` sets `image_build_context = "../.."` so Docker sees the whole workspace (see `examples/basic/README.md` for the full flow).
+## Deploying to Cloudflare Containers
 
-Verify the deployment from your machine:
 ```bash
-# Tail Worker + Durable Object logs (Ctrl+C to stop)
-npx wrangler tail containerflare-basic --format=pretty
+cd examples/basic
+npm install                         # installs Wrangler v4 and @cloudflare/containers
+npx wrangler login                  # or export CLOUDFLARE_API_TOKEN=...
+npx wrangler deploy                 # builds + pushes the Docker image and Worker
+```
 
-# Inspect container rollout + health
+The example’s `wrangler.toml` sets `image_build_context = "../.."`, so the Docker build sees
+the entire workspace (the example crate depends on this repo via `path = "../.."`). After
+deploy Wrangler prints a `workers.dev` URL that proxies into your container:
+
+```bash
+npx wrangler tail containerflare-basic --format=pretty
 npx wrangler containers list
 npx wrangler containers logs --name containerflare-basic-containerflarebasic
-
-# Hit the deployed Worker route printed by wrangler deploy
 curl https://containerflare-basic.<your-account>.workers.dev/
 ```
 
 ## Metadata bridge
-The Worker shim adds an `x-containerflare-metadata` header before proxying each request into the container. That JSON payload contains the request ID (`cf-ray`), colo/region, country, client IP, worker name (set via the `CONTAINERFLARE_WORKER` var in `wrangler.toml`), and the full URL/method. On the Rust side you can read those fields via `ContainerContext::metadata()` (see `RequestMetadata` in `src/context.rs`). If you customize the Worker, keep forwarding that header so handlers continue to receive Cloudflare-specific context.
 
-## Target triple & container expectations
-Cloudflare’s official Containers docs state that “containers should be built for the `linux/amd64` architecture” (`cloudflare-docs/src/content/docs/containers/platform-details/architecture.mdx:79`).
+The Worker shim (see `examples/basic/worker/index.js`) adds an `x-containerflare-metadata`
+header before proxying every request into the container. That JSON payload includes:
 
-To match that requirement we build binaries for `x86_64-unknown-linux-musl` and ship them in an Alpine-based OCI image. That keeps the runtime statically linked, easy to distribute, and compatible with Cloudflare’s VM isolation model. A typical build command:
+- request identifier (`cf-ray`)
+- colo / region / country codes
+- client IP
+- worker name (derived from the `CONTAINERFLARE_WORKER` Wrangler variable)
+- HTTP method, path, and full URL
 
-```bash
-cargo build --release --target x86_64-unknown-linux-musl
-```
+On the Rust side you can read all of those fields via `ContainerContext::metadata()` (see
+`RequestMetadata` in `src/context.rs`). If you customize the Worker, keep writing this header
+so your Axum handlers continue to receive Cloudflare context.
 
-The runtime now binds to `0.0.0.0:8787` by default so Cloudflare’s sidecar (which connects from `10.0.0.1`) can reach the Axum server without extra configuration. Override `CF_CONTAINER_ADDR`/`CF_CONTAINER_PORT` if you need a different address or port locally.
+## Example project
 
-If you need glibc, you can swap Alpine for a Debian/Ubuntu base image and target `x86_64-unknown-linux-gnu`, but the runtime must still be packaged as an amd64 container image.
+`examples/basic` is a real Cargo crate that depends on `containerflare` via `path = "../.."`.
+It ships with:
 
-## Quick start
-```rust
-use axum::{routing::get, Router};
-use containerflare::run;
+- a Dockerfile that builds for `x86_64-unknown-linux-musl`
+- a Worker/Durable Object that forwards metadata and proxies requests
+- deployment scripts and docs for Wrangler v4
 
-#[tokio::main]
-async fn main() -> containerflare::Result<()> {
-    let router = Router::new().route("/", get(|| async { "ok" }));
-    run(router).await
-}
-```
+Use it as a template for your own containerized Workers.
 
-Run the binary inside your container image. Cloudflare will proxy requests from the worker/DO into the Axum listener bound by `containerflare` (defaults to `0.0.0.0:8787`). Use `CF_CMD_ENDPOINT` to point the command client at a different IPC channel (for example `tcp://127.0.0.1:9000` when testing against a local shim).
+## Platform expectations
+
+- Cloudflare currently expects Containers to be built for the `linux/amd64` architecture, so we
+  target `x86_64-unknown-linux-musl` by default. You could just as easily use a debian/ubuntu
+  based image, however alpine/musl is great for small container sizes
+- The runtime binds to `0.0.0.0:8787` so the Cloudflare sidecar (which connects from
+  `10.0.0.1`) can reach your Axum listener. Override `CF_CONTAINER_ADDR` / `CF_CONTAINER_PORT`
+  for custom setups.
+- The `CommandClient` speaks JSON-over-STDIO for now. When Cloudflare documents additional
+  transports we can add typed helpers on top of it.
+
+Contributions are welcome—file issues or PRs with ideas!

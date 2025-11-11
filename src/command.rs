@@ -22,6 +22,11 @@ use crate::config::CommandEndpoint;
 
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// High-level client that talks to Cloudflare's host-managed command channel.
+///
+/// Commands are framed as JSON lines and travel over stdin/stdout (default), TCP, or
+/// Unix sockets (when enabled). Responses are deserialized back into [`CommandResponse`]
+/// instances and surfaced through async APIs.
 #[derive(Clone, Debug)]
 pub struct CommandClient {
     inner: Arc<CommandClientInner>,
@@ -36,10 +41,12 @@ struct CommandClientInner {
 }
 
 impl CommandClient {
+    /// Connects to the configured endpoint using the default timeout.
     pub async fn connect(endpoint: CommandEndpoint) -> Result<Self, CommandError> {
         Self::connect_with_timeout(endpoint, DEFAULT_COMMAND_TIMEOUT).await
     }
 
+    /// Connects to the endpoint and enforces a custom read timeout.
     pub async fn connect_with_timeout(
         endpoint: CommandEndpoint,
         timeout: Duration,
@@ -78,10 +85,12 @@ impl CommandClient {
         })
     }
 
+    /// Returns the endpoint backing this client.
     pub fn endpoint(&self) -> &CommandEndpoint {
         &self.inner.endpoint
     }
 
+    /// Sends a command request and waits for a response (or timeout).
     pub async fn send(&self, request: CommandRequest) -> Result<CommandResponse, CommandError> {
         self.inner.writer.send(&request).await?;
 
@@ -106,6 +115,7 @@ impl CommandClient {
     }
 }
 
+/// JSON payload describing a command issued to the host.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandRequest {
     pub command: String,
@@ -114,6 +124,7 @@ pub struct CommandRequest {
 }
 
 impl CommandRequest {
+    /// Creates a new request with the provided command name and payload.
     pub fn new(command: impl Into<String>, payload: serde_json::Value) -> Self {
         Self {
             command: command.into(),
@@ -121,11 +132,13 @@ impl CommandRequest {
         }
     }
 
+    /// Creates a request whose payload is `null`.
     pub fn empty(command: impl Into<String>) -> Self {
         Self::new(command, serde_json::Value::Null)
     }
 }
 
+/// Response returned by the host for a previously issued command.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandResponse {
     pub ok: bool,
@@ -136,6 +149,7 @@ pub struct CommandResponse {
 }
 
 impl CommandResponse {
+    /// Constructs a success response with an empty payload.
     pub fn ok() -> Self {
         Self {
             ok: true,
@@ -145,6 +159,8 @@ impl CommandResponse {
     }
 }
 
+/// Errors emitted by [`CommandClient`].
+/// Errors emitted by [`CommandClient`].
 #[derive(Debug, Error)]
 pub enum CommandError {
     #[error("command failed: {diagnostic}")]

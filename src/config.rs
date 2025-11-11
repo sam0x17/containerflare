@@ -13,6 +13,7 @@ pub struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
+    /// Loads configuration from Cloudflare-supplied `CF_*` environment variables.
     pub fn from_env() -> Result<Self, ConfigError> {
         let port = env::var("CF_CONTAINER_PORT")
             .ok()
@@ -38,12 +39,14 @@ impl RuntimeConfig {
         })
     }
 
+    /// Returns a builder for programmatic overrides.
     pub fn builder() -> RuntimeConfigBuilder {
         RuntimeConfigBuilder::default()
     }
 }
 
 impl Default for RuntimeConfig {
+    /// Binds to `0.0.0.0:8787` and talks to the host over stdio.
     fn default() -> Self {
         // Default matches the local Cloudflare containers sidecar contract.
         Self {
@@ -53,6 +56,7 @@ impl Default for RuntimeConfig {
     }
 }
 
+/// Describes how the container establishes the host command channel.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandEndpoint {
     Stdio,
@@ -89,6 +93,7 @@ impl FromStr for CommandEndpoint {
     }
 }
 
+/// Builder type for [`RuntimeConfig`].
 #[derive(Default, Clone, Debug)]
 pub struct RuntimeConfigBuilder {
     bind_addr: Option<SocketAddr>,
@@ -96,16 +101,19 @@ pub struct RuntimeConfigBuilder {
 }
 
 impl RuntimeConfigBuilder {
+    /// Sets the address for the embedded Axum listener.
     pub fn bind_addr(mut self, addr: SocketAddr) -> Self {
         self.bind_addr = Some(addr);
         self
     }
 
+    /// Sets the host command endpoint transport.
     pub fn command_endpoint(mut self, endpoint: CommandEndpoint) -> Self {
         self.command_endpoint = Some(endpoint);
         self
     }
 
+    /// Builds the final configuration.
     pub fn build(self) -> RuntimeConfig {
         RuntimeConfig {
             bind_addr: self
@@ -118,6 +126,7 @@ impl RuntimeConfigBuilder {
     }
 }
 
+/// Errors that can occur while building [`RuntimeConfig`].
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("invalid command endpoint: {0}")]
