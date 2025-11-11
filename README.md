@@ -8,6 +8,27 @@ Rust runtime helpers for building Cloudflare Containers Workers with Axum. The c
 
 See `ARCHITECTURE.md` for the full iteration plan.
 
+## Examples
+`examples/basic` hosts a standalone Axum crate (it depends on this repo via `path = "../.."`) plus its container + Worker scaffolding. Building requires Rust 1.84+ (edition 2024).
+
+Run it directly without containers:
+```bash
+cargo run -p containerflare-basic-example
+```
+
+Build the container locally:
+```bash
+docker build --platform=linux/amd64 -f examples/basic/Dockerfile .
+```
+
+Smoke test the image:
+```bash
+docker run --rm --platform=linux/amd64 -e CF_CONTAINER_ADDR=0.0.0.0 -p 8787:8787 containerflare-basic
+curl http://127.0.0.1:8787/
+```
+
+Deploy via Cloudflare Containers by running `npm install` inside `examples/basic` and executing `npx wrangler deploy` (see `examples/basic/README.md` for the full flow).
+
 ## Target triple & container expectations
 Cloudflare’s official Containers docs state that “containers should be built for the `linux/amd64` architecture” (`cloudflare-docs/src/content/docs/containers/platform-details/architecture.mdx:79`).
 

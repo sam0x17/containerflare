@@ -1,0 +1,16 @@
+name = "containerflare-basic"
+main = "worker/index.js"
+compatibility_date = "2025-01-30"
+
+[[containers]]
+class_name = "ContainerflareBasic"
+image = "./Dockerfile"
+max_instances = 5
+
+[[durable_objects.bindings]]
+name = "CONTAINERFLARE_BASIC"
+class_name = "ContainerflareBasic"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ContainerflareBasic"]
