@@ -57,8 +57,7 @@ impl Default for RuntimeConfig {
 }
 
 /// Describes how the container establishes the host command channel.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum CommandEndpoint {
     #[default]
     Stdio,
@@ -66,7 +65,6 @@ pub enum CommandEndpoint {
     UnixSocket(PathBuf),
     Tcp(String),
 }
-
 
 impl FromStr for CommandEndpoint {
     type Err = ConfigError;
@@ -116,9 +114,7 @@ impl RuntimeConfigBuilder {
             bind_addr: self
                 .bind_addr
                 .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 8787)),
-            command_endpoint: self
-                .command_endpoint
-                .unwrap_or_default(),
+            command_endpoint: self.command_endpoint.unwrap_or_default(),
         }
     }
 }
