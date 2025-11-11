@@ -1,6 +1,8 @@
 name = "containerflare-basic"
 main = "worker/index.js"
 compatibility_date = "2025-01-30"
+workers_dev = true
+preview_urls = true
 
 [[containers]]
 class_name = "ContainerflareBasic"

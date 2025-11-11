@@ -33,3 +33,20 @@ curl http://127.0.0.1:8787/
    ```
 
 `wrangler deploy` builds the Docker image, pushes it to Cloudflare's registry, and deploys the Worker/Durable Object that proxies requests into the Axum server running inside the container.
+
+## Test in Cloudflare
+After deployment, Wrangler prints a `workers.dev` URL. Exercise the Worker/Container pair and watch logs:
+
+```bash
+# Fetch from the deployed Worker (replace with the URL wrangler printed)
+curl https://containerflare-basic.<your-account>.workers.dev/metadata
+
+# Stream Worker/Durable Object logs
+npx wrangler tail containerflare-basic --format=pretty
+
+# Inspect container rollout + runtime logs
+npx wrangler containers list
+npx wrangler containers logs --name containerflare-basic-containerflarebasic
+```
+
+When you're done, `npx wrangler deployments list` shows previous versions and `npx wrangler delete` tears everything down.

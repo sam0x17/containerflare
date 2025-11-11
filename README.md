@@ -29,6 +29,19 @@ curl http://127.0.0.1:8787/
 
 Deploy via Cloudflare Containers by running `npm install` inside `examples/basic` (installs Wrangler v4) and executing `npx wrangler deploy` after logging in with `npx wrangler login` or setting `CLOUDFLARE_API_TOKEN`. The example’s `wrangler.toml` sets `image_build_context = "../.."` so Docker sees the whole workspace (see `examples/basic/README.md` for the full flow).
 
+Verify the deployment from your machine:
+```bash
+# Tail Worker + Durable Object logs (Ctrl+C to stop)
+npx wrangler tail containerflare-basic --format=pretty
+
+# Inspect container rollout + health
+npx wrangler containers list
+npx wrangler containers logs --name containerflare-basic-containerflarebasic
+
+# Hit the deployed Worker route printed by wrangler deploy
+curl https://containerflare-basic.<your-account>.workers.dev/
+```
+
 ## Target triple & container expectations
 Cloudflare’s official Containers docs state that “containers should be built for the `linux/amd64` architecture” (`cloudflare-docs/src/content/docs/containers/platform-details/architecture.mdx:79`).
 
