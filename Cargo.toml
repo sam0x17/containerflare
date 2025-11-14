@@ -7,6 +7,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+containerflare-command = { path = "containerflare-command" }
 axum = "0.7"
 hyper = { version = "1", features = ["server", "http1"] }
 serde = { version = "1", features = ["derive"] }
@@ -17,7 +18,7 @@ tracing = "0.1"
 async-trait = "0.1"
 
 [workspace]
-members = [
+members = ["containerflare-command",
     "examples/basic",
 ]
 resolver = "2"

@@ -32,7 +32,7 @@
 1. `ContainerRuntime` bootstraps the process: reads config/environment, wires stdin/stdout to
    host IPC, spawns Axum server inside the container, and translates between Cloudflare host
    requests and Axum `Request`s.
-2. `CommandClient` pushes structured JSON commands over the same IPC channel (or TCP
+2. `CommandClient` (in the standalone `containerflare-command` crate) pushes structured JSON commands over the same IPC channel (or TCP
    unix-socket when available) and awaits responses.
 3. Axum handlers access host capabilities via `ContainerContext`, injected as an
    extension/state, keeping handler ergonomics idiomatic.
@@ -51,7 +51,7 @@
     Metadata is populated from the Worker-supplied `x-containerflare-metadata` header (request
     id, colo/region/country, client IP, etc.) with HTTP header fallbacks for local testing.
   - Implements `FromRequestParts` for easy injection into Axum handlers.
-- `containerflare::command`
+- `containerflare-command` (workspace crate re-exported by `containerflare`)
   - Owns the low-level IPC transport (stdin/stdout framing while sockets are not GA yet).
   - Provides strongly-typed requests/responses (start with generic
     `CommandRequest`/`CommandResponse`).
@@ -70,6 +70,8 @@
    client.
 
 ## Host Command Channel
+All IPC transport code now lives in the standalone `containerflare-command` crate (still
+re-exported by `containerflare` for convenience).
 - Transport: JSON lines over stdin/stdout for MVP (implemented). Local testing can swap to TCP
   or Unix sockets by setting `CF_CMD_ENDPOINT`.
 - `CommandClient` serializes commands sequentially with flush/timeout guarantees and surfaces

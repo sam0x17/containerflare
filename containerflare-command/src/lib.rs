@@ -1,5 +1,9 @@
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+
+#[cfg(unix)]
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -18,9 +22,48 @@ use tokio::net::{
     unix::OwnedReadHalf as UnixOwnedReadHalf, unix::OwnedWriteHalf as UnixOwnedWriteHalf,
 };
 
-use crate::config::CommandEndpoint;
-
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Describes how the container establishes the host command channel transport.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub enum CommandEndpoint {
+    #[default]
+    Stdio,
+    #[cfg(unix)]
+    UnixSocket(PathBuf),
+    Tcp(String),
+}
+
+impl FromStr for CommandEndpoint {
+    type Err = CommandEndpointParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let value = s.trim();
+        if value.eq_ignore_ascii_case("stdio") {
+            return Ok(CommandEndpoint::Stdio);
+        }
+
+        #[cfg(unix)]
+        if let Some(path) = value.strip_prefix("unix://") {
+            return Ok(CommandEndpoint::UnixSocket(PathBuf::from(path)));
+        }
+
+        if let Some(addr) = value.strip_prefix("tcp://") {
+            return Ok(CommandEndpoint::Tcp(addr.to_owned()));
+        }
+
+        Err(CommandEndpointParseError::InvalidCommandEndpoint(
+            value.to_owned(),
+        ))
+    }
+}
+
+/// Errors encountered while parsing a [`CommandEndpoint`] from a string.
+#[derive(Debug, Error, Clone)]
+pub enum CommandEndpointParseError {
+    #[error("invalid command endpoint: {0}")]
+    InvalidCommandEndpoint(String),
+}
 
 /// High-level client that talks to Cloudflare's host-managed command channel.
 ///
@@ -159,7 +202,6 @@ impl CommandResponse {
     }
 }
 
-/// Errors emitted by [`CommandClient`].
 /// Errors emitted by [`CommandClient`].
 #[derive(Debug, Error)]
 pub enum CommandError {

@@ -1,8 +1,8 @@
 use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::PathBuf;
 use std::str::FromStr;
 
+use containerflare_command::CommandEndpoint;
 use thiserror::Error;
 
 /// Configuration consumed by the runtime before spinning up Axum/hyper.
@@ -29,7 +29,10 @@ impl RuntimeConfig {
 
         let command_endpoint = env::var("CF_CMD_ENDPOINT")
             .ok()
-            .map(|value| value.parse())
+            .map(|value| {
+                CommandEndpoint::from_str(&value)
+                    .map_err(|_| ConfigError::InvalidCommandEndpoint(value))
+            })
             .transpose()? // convert Option<Result> -> Result<Option>
             .unwrap_or_default();
 
@@ -53,38 +56,6 @@ impl Default for RuntimeConfig {
             bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 8787),
             command_endpoint: CommandEndpoint::Stdio,
         }
-    }
-}
-
-/// Describes how the container establishes the host command channel.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub enum CommandEndpoint {
-    #[default]
-    Stdio,
-    #[cfg(unix)]
-    UnixSocket(PathBuf),
-    Tcp(String),
-}
-
-impl FromStr for CommandEndpoint {
-    type Err = ConfigError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let value = s.trim();
-        if value.eq_ignore_ascii_case("stdio") {
-            return Ok(CommandEndpoint::Stdio);
-        }
-
-        #[cfg(unix)]
-        if let Some(path) = value.strip_prefix("unix://") {
-            return Ok(CommandEndpoint::UnixSocket(PathBuf::from(path)));
-        }
-
-        if let Some(addr) = value.strip_prefix("tcp://") {
-            return Ok(CommandEndpoint::Tcp(addr.to_owned()));
-        }
-
-        Err(ConfigError::InvalidCommandEndpoint(value.to_owned()))
     }
 }
 
@@ -129,6 +100,7 @@ pub enum ConfigError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use containerflare_command::CommandEndpoint;
     #[cfg(unix)]
     use std::path::PathBuf;
 

@@ -1,7 +1,7 @@
 use thiserror::Error;
 
-use crate::command::CommandError;
 use crate::config::ConfigError;
+use containerflare_command::CommandError;
 
 pub type Result<T> = std::result::Result<T, ContainerflareError>;
 

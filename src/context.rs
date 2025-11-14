@@ -6,7 +6,7 @@ use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::command::{CommandClient, CommandError, CommandRequest, CommandResponse};
+use containerflare_command::{CommandClient, CommandError, CommandRequest, CommandResponse};
 
 /// Header set by the Worker shim that carries Cloudflare-specific request metadata.
 const METADATA_HEADER: &str = "x-containerflare-metadata";

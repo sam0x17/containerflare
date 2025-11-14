@@ -18,8 +18,8 @@ The result feels like developing any other Axum app—only now it runs next to y
 - **Axum-first runtime** – bring your own router, tower layers, extractors, etc.
 - **Cloudflare metadata bridge** – request ID, colo/region/country, client IP, worker name, and
   URLs are injected via `ContainerContext`.
-- **Command channel client** – talk JSON-over-STDIO (default), TCP, or Unix sockets to the host
-  when Cloudflare publishes more capabilities.
+- **Command channel client** – talk JSON-over-STDIO (default), TCP, or Unix sockets to the host;
+  the IPC layer now ships as the standalone `containerflare-command` crate for direct use.
 - **Production-ready example** – `examples/basic` demonstrates a full Worker + Durable Object +
   container deployment using Wrangler v4.
 
@@ -58,6 +58,18 @@ Run the binary inside your container image. Cloudflare will proxy HTTP traffic f
 Worker/Durable Object to the listener bound by `containerflare` (defaults to `0.0.0.0:8787`).
 Override `CF_CONTAINER_ADDR`/`CF_CONTAINER_PORT` if you need something else locally. Use
 `CF_CMD_ENDPOINT` when pointing the command client at a TCP or Unix socket shim.
+
+## Standalone command crate
+
+If you only need access to the host-managed command bus (KV, R2, Queues, etc.), depend on
+[`containerflare-command`](https://crates.io/crates/containerflare-command) directly:
+
+```bash
+cargo add containerflare-command
+```
+
+It exposes `CommandClient`, `CommandRequest`, `CommandResponse`, and the `CommandEndpoint`
+parsers without pulling in the runtime/router pieces.
 
 ## Running locally
 

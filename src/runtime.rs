@@ -2,9 +2,9 @@ use axum::Router;
 use axum::extract::Extension;
 use tokio::net::TcpListener;
 
-use crate::command::CommandClient;
 use crate::config::RuntimeConfig;
 use crate::error::Result;
+use containerflare_command::CommandClient;
 
 /// High-level runtime that wires an Axum router into Cloudflare's container environment.
 pub struct ContainerflareRuntime {

@@ -10,6 +10,7 @@ RUN apk add --no-cache build-base musl-dev
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY examples ./examples
+COPY containerflare-command ./containerflare-command
 
 # Build the basic example crate (which depends on containerflare via a path dependency) for musl/amd64.
 RUN rustup update stable && \
