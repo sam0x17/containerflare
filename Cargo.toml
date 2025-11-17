@@ -2,9 +2,11 @@
 name = "containerflare"
 version.workspace = true
 authors = ["sam0x17"]
-license = "MIT"
 description = "A runtime for writing Rust-based Cloudflare Workers running in the Cloudflare Workers container runtime"
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
 
 [dependencies]
 containerflare-command = { path = "containerflare-command", version = "0.1.0" }
@@ -27,3 +29,6 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+repository = "https://github.com/sam0x17/containerflare"
+keywords = ["cloudflare", "workers", "runtime", "containers", "serverless"]

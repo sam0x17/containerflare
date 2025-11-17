@@ -3,6 +3,9 @@ name = "containerflare-basic-example"
 version.workspace = true
 edition.workspace = true
 publish = false
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
 
 [dependencies]
 axum = "0.7"

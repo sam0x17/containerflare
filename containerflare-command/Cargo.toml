@@ -3,7 +3,9 @@ name = "containerflare-command"
 version.workspace = true
 edition.workspace = true
 authors = ["sam0x17"]
-license = "MIT"
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
 description = "Low-level command channel client used by Containerflare runtimes"
 
 [dependencies]
