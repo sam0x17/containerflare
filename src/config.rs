@@ -3,6 +3,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 
 use containerflare_command::CommandEndpoint;
+use dotenvy::Error as DotenvError;
 use thiserror::Error;
 
 /// Configuration consumed by the runtime before spinning up Axum/hyper.
@@ -14,7 +15,12 @@ pub struct RuntimeConfig {
 
 impl RuntimeConfig {
     /// Loads configuration from Cloudflare-supplied `CF_*` environment variables.
+    ///
+    /// Values from a local `.env` file (parsed via [`dotenvy::dotenv_override`]) override whatever is already set in
+    /// the process environment, which makes local development workflows predictable.
     pub fn from_env() -> Result<Self, ConfigError> {
+        load_env_overrides()?;
+
         let port = env::var("CF_CONTAINER_PORT")
             .ok()
             .and_then(|value| value.parse::<u16>().ok())
@@ -95,6 +101,16 @@ impl RuntimeConfigBuilder {
 pub enum ConfigError {
     #[error("invalid command endpoint: {0}")]
     InvalidCommandEndpoint(String),
+    #[error("failed to load .env overrides: {0}")]
+    Dotenv(#[from] DotenvError),
+}
+
+fn load_env_overrides() -> Result<(), ConfigError> {
+    match dotenvy::dotenv_override() {
+        Ok(_) => Ok(()),
+        Err(err) if err.not_found() => Ok(()),
+        Err(err) => Err(ConfigError::Dotenv(err)),
+    }
 }
 
 #[cfg(test)]

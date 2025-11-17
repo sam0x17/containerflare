@@ -8,6 +8,7 @@ edition = "2024"
 
 [dependencies]
 containerflare-command = { path = "containerflare-command" }
+dotenvy = "0.15"
 axum = "0.7"
 hyper = { version = "1", features = ["server", "http1"] }
 serde = { version = "1", features = ["derive"] }

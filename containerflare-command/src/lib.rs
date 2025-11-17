@@ -70,6 +70,27 @@ pub enum CommandEndpointParseError {
 /// Commands are framed as JSON lines and travel over stdin/stdout (default), TCP, or
 /// Unix sockets (when enabled). Responses are deserialized back into [`CommandResponse`]
 /// instances and surfaced through async APIs.
+///
+/// # Transport Modes
+/// - `stdio`: bidirectional pipes that the Workers container sidecar keeps open.
+/// - `tcp://host:port`: an explicit TCP socket managed by the sidecar.
+/// - `unix://path` *(Unix only)*: a Unix domain socket exposed by the sidecar.
+///
+/// # Errors
+/// All async constructors and [`CommandClient::send`] return [`CommandError`] when the transport
+/// cannot be established, the host drops the channel, or the host reports a failure.
+///
+/// # Examples
+/// ```ignore
+/// use containerflare_command::{CommandClient, CommandEndpoint, CommandRequest};
+///
+/// # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
+/// let client = CommandClient::connect(CommandEndpoint::Stdio).await?;
+/// let response = client.send(CommandRequest::empty("health_check")).await?;
+/// assert!(response.ok);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Debug)]
 pub struct CommandClient {
     inner: Arc<CommandClientInner>,
@@ -85,11 +106,38 @@ struct CommandClientInner {
 
 impl CommandClient {
     /// Connects to the configured endpoint using the default timeout.
+    ///
+    /// # Parameters
+    /// * `endpoint` - Transport descriptor (stdio, TCP, or Unix socket).
+    ///
+    /// # Returns
+    /// A connected [`CommandClient`] ready to issue commands.
+    ///
+    /// # Errors
+    /// Returns [`CommandError`] if the underlying transport cannot be opened or is closed
+    /// before the connection is established.
+    ///
+    /// # Panics
+    /// Does not panic.
     pub async fn connect(endpoint: CommandEndpoint) -> Result<Self, CommandError> {
         Self::connect_with_timeout(endpoint, DEFAULT_COMMAND_TIMEOUT).await
     }
 
     /// Connects to the endpoint and enforces a custom read timeout.
+    ///
+    /// # Parameters
+    /// * `endpoint` - Transport descriptor (stdio, TCP, or Unix socket).
+    /// * `timeout` - Maximum duration to wait for each response before failing.
+    ///
+    /// # Returns
+    /// A connected [`CommandClient`] that enforces the provided timeout for every command.
+    ///
+    /// # Errors
+    /// Returns [`CommandError`] if the underlying transport cannot be opened or the timeout
+    /// elapses while establishing the connection.
+    ///
+    /// # Panics
+    /// Does not panic.
     pub async fn connect_with_timeout(
         endpoint: CommandEndpoint,
         timeout: Duration,
@@ -134,6 +182,19 @@ impl CommandClient {
     }
 
     /// Sends a command request and waits for a response (or timeout).
+    ///
+    /// # Parameters
+    /// * `request` - Structured command for the Workers sidecar.
+    ///
+    /// # Returns
+    /// The [`CommandResponse`] emitted by the sidecar.
+    ///
+    /// # Errors
+    /// Returns [`CommandError`] if the channel closes, the response payload cannot be
+    /// deserialized, the command reports a failure, or the read timeout elapses.
+    ///
+    /// # Panics
+    /// Does not panic.
     pub async fn send(&self, request: CommandRequest) -> Result<CommandResponse, CommandError> {
         self.inner.writer.send(&request).await?;
 
@@ -161,7 +222,9 @@ impl CommandClient {
 /// JSON payload describing a command issued to the host.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandRequest {
+    /// Command verb recognized by the Workers sidecar.
     pub command: String,
+    /// Structured JSON payload to accompany the command (defaults to `null`).
     #[serde(default)]
     pub payload: serde_json::Value,
 }
@@ -184,9 +247,12 @@ impl CommandRequest {
 /// Response returned by the host for a previously issued command.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandResponse {
+    /// Indicates whether the host executed the command successfully.
     pub ok: bool,
+    /// JSON payload returned by the host (defaults to `null`).
     #[serde(default)]
     pub payload: serde_json::Value,
+    /// Optional diagnostic string supplied by the host when `ok == false`.
     #[serde(default)]
     pub diagnostic: Option<String>,
 }
@@ -201,8 +267,7 @@ impl CommandResponse {
         }
     }
 }
-
-/// Errors emitted by [`CommandClient`].
+/// Errors emitted by [`CommandClient`] when transport or payload handling fails.
 #[derive(Debug, Error)]
 pub enum CommandError {
     #[error("command failed: {diagnostic}")]
