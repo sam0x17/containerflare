@@ -38,7 +38,7 @@ impl ContainerContext {
 /// Cloudflare metadata forwarded by the Worker shim.
 ///
 /// Mirrors the fields documented in Cloudflare's `cf` object:
-/// https://developers.cloudflare.com/workers/runtime-apis/request/#incomingrequestcfproperties
+/// <https://developers.cloudflare.com/workers/runtime-apis/request/#incomingrequestcfproperties>
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RequestMetadata {
