@@ -1,13 +1,13 @@
 [package]
 name = "containerflare"
+version.workspace = true
 authors = ["sam0x17"]
 license = "MIT"
 description = "A runtime for writing Rust-based Cloudflare Workers running in the Cloudflare Workers container runtime"
-version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 
 [dependencies]
-containerflare-command = { path = "containerflare-command" }
+containerflare-command = { path = "containerflare-command", version = "0.1.0" }
 dotenvy = "0.15"
 axum = "0.7"
 hyper = { version = "1", features = ["server", "http1"] }
@@ -23,3 +23,7 @@ members = ["containerflare-command",
     "examples/basic",
 ]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
