@@ -23,6 +23,7 @@ async-trait = "0.1"
 [workspace]
 members = ["containerflare-command",
     "examples/basic",
+    "examples/cloudrun",
 ]
 resolver = "2"
 

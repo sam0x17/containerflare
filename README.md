@@ -4,12 +4,12 @@
 [![Docs](https://docs.rs/containerflare/badge.svg)](https://docs.rs/containerflare)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-`containerflare` lets you run Axum inside [Cloudflare Containers](https://developers.cloudflare.com/containers) without re-implementing the platform glue. It exposes a tiny runtime that:
+`containerflare` lets you run Axum inside [Cloudflare Containers](https://developers.cloudflare.com/containers) without re-implementing the platform glue, and now auto-detects when it is executing on [Google Cloud Run](https://cloud.google.com/run). It exposes a tiny runtime that:
 
-- boots an Axum router on the container’s loopback listener
-- forwards Cloudflare request metadata into your handlers
+- boots an Axum router on the container’s loopback listener (or Cloud Run’s `PORT` binding)
+- forwards Cloudflare/Cloud Run request metadata into your handlers
 - keeps a command channel open so you can reach host-managed capabilities (KV, D1, Queues,
-  etc.)
+  etc.) whenever the platform exposes one
 
 The result feels like developing any other Axum app—only now it runs next to your Worker.
 
@@ -18,10 +18,13 @@ The result feels like developing any other Axum app—only now it runs next to y
 - **Axum-first runtime** – bring your own router, tower layers, extractors, etc.
 - **Cloudflare metadata bridge** – request ID, colo/region/country, client IP, worker name, and
   URLs are injected via `ContainerContext`.
+- **Cloud Run aware** – automatically binds to the Cloud Run `PORT`, populates service /
+  revision / project / trace fields, and disables the host command channel when unavailable.
 - **Command channel client** – talk JSON-over-STDIO (default), TCP, or Unix sockets to the host;
   the IPC layer now ships as the standalone `containerflare-command` crate for direct use.
-- **Production-ready example** – `examples/basic` demonstrates a full Worker + Durable Object +
-  container deployment using Wrangler v4.
+- **Production-ready examples** – `examples/basic` demonstrates a full Cloudflare deployment
+  (Worker + Durable Object + container). `examples/cloudrun` mirrors the same Axum app but targets
+  Google Cloud Run with its own Dockerfile + deployment guide.
 
 ## Installation
 
@@ -48,21 +51,28 @@ async fn metadata(ctx: ContainerContext) -> Json<RequestMetadata> {
 }
 ```
 
-- `ContainerContext` is injected via Axum’s extractor system.
+- `ContainerContext` is injected via Axum’s extractor system and surfaces
+  `ContainerContext::platform()` so you can differentiate between Cloudflare and Cloud Run.
 - `RequestMetadata` contains everything Cloudflare knows about the request (worker name, colo,
-  region, `cf-ray`, client IP, method/path/url, etc.).
+  region, `cf-ray`, client IP, method/path/url, etc.) plus Cloud Run service/revision/
+  configuration/project information and the parsed `x-cloud-trace-context` header when present.
 - `ContainerContext::command_client()` provides the low-level JSON command channel; call
-  `invoke` whenever Cloudflare documents a capability.
+  `invoke` whenever Cloudflare documents a capability. On Cloud Run the channel is disabled and
+  the client reports `CommandError::Unavailable` so you can log or fall back gracefully.
 
 Run the binary inside your container image. Cloudflare will proxy HTTP traffic from the
 Worker/Durable Object to the listener bound by `containerflare` (defaults to `0.0.0.0:8787`).
-Override `CF_CONTAINER_ADDR`/`CF_CONTAINER_PORT` if you need something else locally. Use
-`CF_CMD_ENDPOINT` when pointing the command client at a TCP or Unix socket shim.
+Override `CF_CONTAINER_ADDR`/`CF_CONTAINER_PORT` if you need something else locally. On Cloud Run
+the runtime automatically binds to the provided `PORT` (defaulting to 8080 when running the sample
+Dockerfile locally). Use `CF_CMD_ENDPOINT` when pointing the command client at a TCP or Unix socket
+shim.
 
 ## Standalone command crate
 
 If you only need access to the host-managed command bus (KV, R2, Queues, etc.), depend on
-[`containerflare-command`](https://crates.io/crates/containerflare-command) directly:
+[`containerflare-command`](https://crates.io/crates/containerflare-command) directly. Cloud Run
+does not expose this bus so commands immediately return `CommandError::Unavailable`, but the same
+API works on Cloudflare Containers:
 
 ```bash
 cargo add containerflare-command
@@ -102,6 +112,27 @@ npx wrangler containers logs --name containerflare-basic-containerflarebasic
 curl https://containerflare-basic.<your-account>.workers.dev/
 ```
 
+## Deploying to Google Cloud Run
+
+Google Cloud Run support lives under `examples/cloudrun`. The example is a normal Cargo crate +
+Dockerfile that you can run locally or deploy via `gcloud`:
+
+```bash
+cd examples/cloudrun
+cargo run -p containerflare-cloudrun-example          # binds to 8787 locally
+
+# build the Cloud Run container
+docker build --platform=linux/amd64 -f Dockerfile -t containerflare-cloudrun .
+PORT=8080 docker run --rm -p 8080:8080 -e PORT=8080 containerflare-cloudrun
+
+# deploy (full gcloud instructions live in examples/cloudrun/README.md)
+```
+
+When `containerflare` detects Cloud Run it binds to the injected `PORT`, captures
+`K_SERVICE`/`K_REVISION`/`K_CONFIGURATION`/`GOOGLE_CLOUD_PROJECT`, parses
+`x-cloud-trace-context`, and disables the host command channel. Handlers can inspect that state via
+`ContainerContext::platform()` and the new Cloud Run fields on `RequestMetadata`.
+
 ## Metadata bridge
 
 The Worker shim (see `examples/basic/worker/index.js`) adds an `x-containerflare-metadata`
@@ -117,6 +148,11 @@ On the Rust side you can read all of those fields via `ContainerContext::metadat
 `RequestMetadata` in `src/context.rs`). If you customize the Worker, keep writing this header
 so your Axum handlers continue to receive Cloudflare context.
 
+On Cloud Run the runtime infers metadata directly from HTTP headers + environment variables. It
+records the service, revision, configuration, project ID, region, trace/span IDs, and whether the
+request is sampled based on the `x-cloud-trace-context` header. These new fields appear on
+`RequestMetadata` alongside the existing Cloudflare values.
+
 ## Example project
 
 `examples/basic` is a real Cargo crate that depends on `containerflare` via `path = "../.."`.
@@ -128,15 +164,21 @@ It ships with:
 
 Use it as a template for your own containerized Workers.
 
+`examples/cloudrun` mirrors the same pattern but targets Google Cloud Run. It echoes both the
+standard metadata and the detected platform (`ContainerContext::platform()`) so you can see exactly
+which fields are available when running outside Cloudflare.
+
 ## Platform expectations
 
 - Cloudflare currently expects Containers to be built for the `linux/amd64` architecture, so we
   target `x86_64-unknown-linux-musl` by default. You could just as easily use a debian/ubuntu
-  based image, however alpine/musl is great for small container sizes
+  based image, however alpine/musl is great for small container sizes.
 - The runtime binds to `0.0.0.0:8787` so the Cloudflare sidecar (which connects from
   `10.0.0.1`) can reach your Axum listener. Override `CF_CONTAINER_ADDR` / `CF_CONTAINER_PORT`
-  for custom setups.
+  for custom setups. On Cloud Run the runtime binds to the injected `PORT` (usually 8080 when
+  running locally).
 - The `CommandClient` speaks JSON-over-STDIO for now. When Cloudflare documents additional
-  transports we can add typed helpers on top of it.
+  transports we can add typed helpers on top of it. Cloud Run disables the channel, so the client
+  immediately returns `CommandError::Unavailable`.
 
 Contributions are welcome—file issues or PRs with ideas!

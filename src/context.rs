@@ -8,14 +8,18 @@ use thiserror::Error;
 
 use containerflare_command::{CommandClient, CommandError, CommandRequest, CommandResponse};
 
+use crate::platform::{CloudRunPlatform, CloudflarePlatform, RuntimePlatform};
+
 /// Header set by the Worker shim that carries Cloudflare-specific request metadata.
 const METADATA_HEADER: &str = "x-containerflare-metadata";
 
-/// Request-scoped handle that exposes Cloudflare request metadata plus the host command client.
+/// Request-scoped handle that exposes platform-specific request metadata plus the host command
+/// client.
 #[derive(Clone, Debug)]
 pub struct ContainerContext {
     metadata: RequestMetadata,
     command_client: CommandClient,
+    platform: RuntimePlatform,
 }
 
 impl ContainerContext {
@@ -29,16 +33,24 @@ impl ContainerContext {
         &self.command_client
     }
 
+    /// Returns the runtime platform detected from the environment.
+    pub fn platform(&self) -> &RuntimePlatform {
+        &self.platform
+    }
+
     /// Issues an IPC command over the host-managed channel.
     pub async fn invoke(&self, request: CommandRequest) -> Result<CommandResponse, CommandError> {
         self.command_client.send(request).await
     }
 }
 
-/// Cloudflare metadata forwarded by the Worker shim.
+/// Cloudflare metadata forwarded by the Worker shim plus additional Cloud Run details inferred
+/// from headers and environment variables.
 ///
-/// Mirrors the fields documented in Cloudflare's `cf` object:
-/// <https://developers.cloudflare.com/workers/runtime-apis/request/#incomingrequestcfproperties>
+/// For Cloudflare Containers this mirrors the fields documented in Cloudflare's `cf` object:
+/// <https://developers.cloudflare.com/workers/runtime-apis/request/#incomingrequestcfproperties>.
+/// When running on Google Cloud Run the `cloud_run_*`, `project_id`, and `trace_context` fields
+/// are populated automatically from the platform metadata and `x-cloud-trace-context` header.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RequestMetadata {
@@ -50,6 +62,12 @@ pub struct RequestMetadata {
     pub host: Option<String>,
     pub scheme: Option<String>,
     pub worker_name: Option<String>,
+    pub project_id: Option<String>,
+    pub cloud_run_service: Option<String>,
+    pub cloud_run_revision: Option<String>,
+    pub cloud_run_configuration: Option<String>,
+    pub cloud_run_region: Option<String>,
+    pub trace_context: Option<TraceContext>,
     pub method: String,
     pub path: String,
     pub raw_url: Option<String>,
@@ -66,6 +84,12 @@ impl Default for RequestMetadata {
             host: None,
             scheme: None,
             worker_name: None,
+            project_id: None,
+            cloud_run_service: None,
+            cloud_run_revision: None,
+            cloud_run_configuration: None,
+            cloud_run_region: None,
+            trace_context: None,
             method: "GET".to_owned(),
             path: "/".to_owned(),
             raw_url: None,
@@ -75,11 +99,31 @@ impl Default for RequestMetadata {
 
 impl RequestMetadata {
     /// Builds metadata from either the shim header or fallbacks for local testing.
-    fn from_parts(parts: &Parts) -> Self {
+    fn from_parts(parts: &Parts, platform: &RuntimePlatform) -> Self {
         if let Some(metadata) = Self::from_metadata_header(parts) {
             return metadata;
         }
 
+        let mut metadata = Self::from_headers(parts);
+
+        if let Some(cf) = platform.as_cloudflare() {
+            metadata.apply_cloudflare_defaults(cf);
+        }
+
+        if let Some(run) = platform.as_cloud_run() {
+            metadata.apply_cloud_run_defaults(parts, run);
+        }
+
+        metadata
+    }
+
+    fn from_metadata_header(parts: &Parts) -> Option<Self> {
+        let header = parts.headers.get(METADATA_HEADER)?;
+        let raw = header.to_str().ok()?;
+        serde_json::from_str(raw).ok()
+    }
+
+    fn from_headers(parts: &Parts) -> Self {
         let headers = &parts.headers;
         let request_id = headers
             .get("cf-ray")
@@ -103,7 +147,8 @@ impl RequestMetadata {
             .and_then(|value| value.to_str().ok())
             .map(|value| value.to_owned());
         let host = headers
-            .get(axum::http::header::HOST)
+            .get("x-forwarded-host")
+            .or_else(|| headers.get(axum::http::header::HOST))
             .and_then(|value| value.to_str().ok())
             .map(|value| value.to_owned());
 
@@ -113,7 +158,11 @@ impl RequestMetadata {
             .clone()
             .unwrap_or_else(|| parts.uri.path().to_owned());
         let raw_url = Some(parts.uri.to_string()).filter(|value| !value.is_empty());
-        let scheme = parts.uri.scheme_str().map(|value| value.to_owned());
+        let scheme = headers
+            .get("x-forwarded-proto")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.to_owned())
+            .or_else(|| parts.uri.scheme_str().map(|value| value.to_owned()));
 
         Self {
             request_id,
@@ -124,16 +173,107 @@ impl RequestMetadata {
             host,
             scheme,
             worker_name: None,
+            project_id: None,
+            cloud_run_service: None,
+            cloud_run_revision: None,
+            cloud_run_configuration: None,
+            cloud_run_region: None,
+            trace_context: None,
             method,
             path,
             raw_url,
         }
     }
 
-    fn from_metadata_header(parts: &Parts) -> Option<Self> {
-        let header = parts.headers.get(METADATA_HEADER)?;
-        let raw = header.to_str().ok()?;
-        serde_json::from_str(raw).ok()
+    fn apply_cloudflare_defaults(&mut self, platform: &CloudflarePlatform) {
+        if self.worker_name.is_none() {
+            self.worker_name = platform.worker_name.clone();
+        }
+    }
+
+    fn apply_cloud_run_defaults(&mut self, parts: &Parts, platform: &CloudRunPlatform) {
+        if self.cloud_run_service.is_none() {
+            self.cloud_run_service = platform.service.clone();
+        }
+        if self.cloud_run_revision.is_none() {
+            self.cloud_run_revision = platform.revision.clone();
+        }
+        if self.cloud_run_configuration.is_none() {
+            self.cloud_run_configuration = platform.configuration.clone();
+        }
+        if self.project_id.is_none() {
+            self.project_id = platform.project_id.clone();
+        }
+        if self.cloud_run_region.is_none() {
+            self.cloud_run_region = platform.region.clone();
+        }
+
+        if let Some(value) = parts
+            .headers
+            .get("x-cloud-trace-context")
+            .and_then(|header| header.to_str().ok())
+        {
+            let trace =
+                TraceContext::from_cloud_trace_header(value, platform.project_id.as_deref());
+            if self.request_id.is_none() {
+                self.request_id = trace.trace_id.clone();
+            }
+            self.trace_context = Some(trace);
+        }
+    }
+}
+
+/// Google Cloud Trace context parsed from `x-cloud-trace-context` headers.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct TraceContext {
+    pub trace_id: Option<String>,
+    pub span_id: Option<String>,
+    pub sampled: Option<bool>,
+    pub project_id: Option<String>,
+    pub raw: Option<String>,
+}
+
+impl TraceContext {
+    fn from_cloud_trace_header(header: &str, project_id: Option<&str>) -> Self {
+        let mut trace_id = None;
+        let mut span_id = None;
+        let mut sampled = None;
+
+        let mut parts = header.split('/');
+        if let Some(trace) = parts.next() {
+            if !trace.is_empty() {
+                trace_id = Some(trace.to_owned());
+            }
+        }
+
+        if let Some(rest) = parts.next() {
+            let mut rest_parts = rest.split(';');
+            if let Some(span) = rest_parts.next() {
+                if !span.is_empty() {
+                    span_id = Some(span.to_owned());
+                }
+            }
+            for section in rest_parts {
+                if let Some(flag) = section
+                    .strip_prefix('o')
+                    .and_then(|value| value.strip_prefix('='))
+                {
+                    sampled = match flag.trim() {
+                        "1" => Some(true),
+                        "0" => Some(false),
+                        _ => None,
+                    };
+                }
+            }
+        }
+
+        Self {
+            trace_id,
+            span_id,
+            sampled,
+            project_id: project_id.map(|value| value.to_owned()),
+            raw: Some(header.to_owned()),
+        }
     }
 }
 
@@ -142,6 +282,8 @@ impl RequestMetadata {
 pub enum ContainerContextRejection {
     #[error("command client missing from request extensions")]
     MissingCommandClient,
+    #[error("runtime platform missing from request extensions")]
+    MissingRuntimePlatform,
 }
 
 impl IntoResponse for ContainerContextRejection {
@@ -166,11 +308,18 @@ where
             .cloned()
             .ok_or(ContainerContextRejection::MissingCommandClient)?;
 
-        let metadata = RequestMetadata::from_parts(parts);
+        let platform = parts
+            .extensions
+            .get::<RuntimePlatform>()
+            .cloned()
+            .ok_or(ContainerContextRejection::MissingRuntimePlatform)?;
+
+        let metadata = RequestMetadata::from_parts(parts, &platform);
 
         Ok(Self {
             metadata,
             command_client,
+            platform,
         })
     }
 }
@@ -194,7 +343,7 @@ mod tests {
             .unwrap();
 
         let (parts, _) = request.into_parts();
-        let metadata = RequestMetadata::from_parts(&parts);
+        let metadata = RequestMetadata::from_parts(&parts, &RuntimePlatform::default());
 
         assert_eq!(metadata.request_id.as_deref(), Some("ray123"));
         assert_eq!(metadata.colo.as_deref(), Some("iad"));
@@ -228,12 +377,57 @@ mod tests {
             .unwrap();
 
         let (parts, _) = request.into_parts();
-        let parsed = RequestMetadata::from_parts(&parts);
+        let parsed = RequestMetadata::from_parts(&parts, &RuntimePlatform::default());
 
         assert_eq!(parsed.request_id, metadata.request_id);
         assert_eq!(parsed.colo, metadata.colo);
         assert_eq!(parsed.worker_name, metadata.worker_name);
         assert_eq!(parsed.path, metadata.path);
         assert_eq!(parsed.raw_url, metadata.raw_url);
+    }
+
+    #[test]
+    fn cloud_run_metadata_from_headers() {
+        let platform = RuntimePlatform::CloudRun(CloudRunPlatform {
+            service: Some("svc".into()),
+            revision: Some("rev".into()),
+            configuration: Some("cfg".into()),
+            project_id: Some("proj-123".into()),
+            region: Some("us-central1".into()),
+        });
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://127.0.0.1/hello")
+            .header("x-forwarded-for", "198.51.100.1")
+            .header("x-forwarded-host", "example.run.app")
+            .header("x-forwarded-proto", "https")
+            .header(
+                "x-cloud-trace-context",
+                "105445aa7843bc8bf206b120001000/123;o=1",
+            )
+            .body(())
+            .unwrap();
+
+        let (parts, _) = request.into_parts();
+        let metadata = RequestMetadata::from_parts(&parts, &platform);
+
+        assert_eq!(metadata.cloud_run_service.as_deref(), Some("svc"));
+        assert_eq!(metadata.cloud_run_revision.as_deref(), Some("rev"));
+        assert_eq!(metadata.cloud_run_configuration.as_deref(), Some("cfg"));
+        assert_eq!(metadata.project_id.as_deref(), Some("proj-123"));
+        assert_eq!(metadata.cloud_run_region.as_deref(), Some("us-central1"));
+        assert_eq!(metadata.scheme.as_deref(), Some("https"));
+        assert_eq!(metadata.host.as_deref(), Some("example.run.app"));
+        assert_eq!(metadata.client_ip.as_deref(), Some("198.51.100.1"));
+        assert_eq!(
+            metadata.request_id.as_deref(),
+            Some("105445aa7843bc8bf206b120001000")
+        );
+        assert!(metadata.trace_context.is_some());
+        assert_eq!(
+            metadata.trace_context.as_ref().unwrap().span_id.as_deref(),
+            Some("123")
+        );
     }
 }
