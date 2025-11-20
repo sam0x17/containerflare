@@ -128,6 +128,10 @@ PORT=8080 docker run --rm -p 8080:8080 -e PORT=8080 containerflare-cloudrun
 # deploy (full gcloud instructions live in examples/cloudrun/README.md)
 ```
 
+Prefer a one-liner? `examples/cloudrun/deploy.sh` builds, pushes, and deploys using your active
+`gcloud` project/region—override `PROJECT_ID`, `REGION`, or `SERVICE_NAME` if needed before running
+it.
+
 When `containerflare` detects Cloud Run it binds to the injected `PORT`, captures
 `K_SERVICE`/`K_REVISION`/`K_CONFIGURATION`/`GOOGLE_CLOUD_PROJECT`, parses
 `x-cloud-trace-context`, and disables the host command channel. Handlers can inspect that state via

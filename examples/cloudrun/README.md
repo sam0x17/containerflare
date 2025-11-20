@@ -27,6 +27,16 @@ platform detection.
 
 ## Deploy to Google Cloud Run
 
+The easiest path is to run the helper script (it infers project/region from your `gcloud`
+defaults):
+
+```bash
+cd examples/cloudrun
+./deploy.sh
+```
+
+Optionally override `PROJECT_ID`, `REGION`, `SERVICE_NAME`, or `TAG` before running the script.
+
 ```bash
 PROJECT_ID="$(gcloud config get-value project)"
 REGION="us-central1"
