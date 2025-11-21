@@ -38,6 +38,7 @@ docker push "${FULL_IMAGE}"
 echo "Deploying ${SERVICE_NAME} to region ${REGION}..."
 gcloud run deploy "${SERVICE_NAME}" \
   --image="${FULL_IMAGE}" \
+  --project="${PROJECT_ID}" \
   --region="${REGION}" \
   --platform=managed \
   --allow-unauthenticated \
