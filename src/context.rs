@@ -228,6 +228,14 @@ impl RequestMetadata {
                 });
         }
 
+        if self.region.is_none() {
+            self.region = self.cloud_run_region.clone();
+        }
+
+        if self.worker_name.is_none() {
+            self.worker_name = self.cloud_run_service.clone();
+        }
+
         if let Some(value) = parts
             .headers
             .get("x-cloud-trace-context")
@@ -537,9 +545,11 @@ mod tests {
         assert_eq!(metadata.cloud_run_configuration.as_deref(), Some("cfg"));
         assert_eq!(metadata.project_id.as_deref(), Some("proj-123"));
         assert_eq!(metadata.cloud_run_region.as_deref(), Some("us-central1"));
+        assert_eq!(metadata.region.as_deref(), Some("us-central1"));
         assert_eq!(metadata.scheme.as_deref(), Some("https"));
         assert_eq!(metadata.host.as_deref(), Some("example.run.app"));
         assert_eq!(metadata.client_ip.as_deref(), Some("198.51.100.1"));
+        assert_eq!(metadata.worker_name.as_deref(), Some("svc"));
         assert_eq!(
             metadata.request_id.as_deref(),
             Some("105445aa7843bc8bf206b120001000")
