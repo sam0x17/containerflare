@@ -4,6 +4,7 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use thiserror::Error;
 
 use containerflare_command::{CommandClient, CommandError, CommandRequest, CommandResponse};
@@ -143,9 +144,8 @@ impl RequestMetadata {
             .map(|value| value.to_owned());
         let client_ip = headers
             .get("cf-connecting-ip")
-            .or_else(|| headers.get("x-forwarded-for"))
-            .and_then(|value| value.to_str().ok())
-            .map(|value| value.to_owned());
+            .and_then(|value| value.to_str().ok().map(|v| v.to_owned()))
+            .or_else(|| pick_client_ip_from_xff(headers));
         let host = headers
             .get("x-forwarded-host")
             .or_else(|| headers.get(axum::http::header::HOST))
@@ -208,6 +208,26 @@ impl RequestMetadata {
             self.cloud_run_region = platform.region.clone();
         }
 
+        if self.cloud_run_region.is_none() {
+            self.cloud_run_region = self
+                .host
+                .as_ref()
+                .and_then(|host| extract_region_from_host(host));
+        }
+
+        if self.project_id.is_none() {
+            self.project_id = platform
+                .project_id
+                .clone()
+                .or_else(|| std::env::var("GOOGLE_CLOUD_PROJECT").ok())
+                .or_else(|| std::env::var("GCLOUD_PROJECT").ok())
+                .or_else(|| {
+                    self.host
+                        .as_ref()
+                        .and_then(|host| extract_project_from_host(host))
+                });
+        }
+
         if let Some(value) = parts
             .headers
             .get("x-cloud-trace-context")
@@ -219,6 +239,21 @@ impl RequestMetadata {
                 self.request_id = trace.trace_id.clone();
             }
             self.trace_context = Some(trace);
+        }
+    }
+
+    /// Attempts to rebuild the raw URL using scheme + host + path when only a path was available.
+    fn rebuild_raw_url_if_needed(&mut self) {
+        let needs_rebuild = self
+            .raw_url
+            .as_ref()
+            .map(|url| url.starts_with('/') || !url.contains("://"))
+            .unwrap_or(true);
+
+        if needs_rebuild {
+            if let (Some(host), Some(scheme)) = (self.host.as_ref(), self.scheme.as_ref()) {
+                self.raw_url = Some(format!("{}://{}{}", scheme, host, self.path));
+            }
         }
     }
 }
@@ -277,6 +312,90 @@ impl TraceContext {
     }
 }
 
+fn pick_client_ip_from_xff(headers: &axum::http::HeaderMap) -> Option<String> {
+    let xff = headers.get("x-forwarded-for")?.to_str().ok()?;
+    let mut first = None;
+    for part in xff.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if first.is_none() {
+            first = Some(part.to_owned());
+        }
+        if let Ok(ip) = part.parse::<IpAddr>() {
+            if is_public_ip(&ip) {
+                return Some(part.to_owned());
+            }
+        }
+    }
+    first
+}
+
+fn is_public_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_unspecified()
+                || v4.is_multicast())
+        }
+        IpAddr::V6(v6) => {
+            !(v6.is_loopback()
+                || v6.is_multicast()
+                || v6.is_unspecified()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local())
+        }
+    }
+}
+
+fn extract_region_from_host(host: &str) -> Option<String> {
+    // Cloud Run hosts look like:
+    // - <service>-<hash>-<region>.a.run.app  (legacy)
+    // - <service>-<projectNumber>.<region>.run.app (modern)
+    let labels: Vec<&str> = host.split('.').collect();
+
+    // Prefer the label immediately before "run".
+    let mut region_part: Option<&str> = None;
+    for window in labels.windows(2) {
+        if window[1] == "run" {
+            region_part = Some(window[0]);
+            break;
+        }
+    }
+
+    // Fallback to the second label (<service>.<region>.run.app).
+    if region_part.is_none() && labels.len() >= 3 {
+        region_part = Some(labels[labels.len().saturating_sub(3)]);
+    }
+
+    let region = region_part?;
+    if region.is_empty() {
+        return None;
+    }
+
+    let mapped = match region {
+        "uc" => "us-central1",
+        "ue" => "us-east1",
+        "uw1" => "us-west1",
+        other => other,
+    };
+
+    Some(mapped.to_owned())
+}
+
+fn extract_project_from_host(host: &str) -> Option<String> {
+    // Modern Cloud Run domains embed the project number in the first label:
+    // <service>-<projectNumber>.<region>.run.app
+    let first_label = host.split('.').next()?;
+    let mut parts = first_label.rsplitn(2, '-');
+    let numeric = parts.next()?;
+    if !numeric.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    Some(numeric.to_owned())
+}
+
 /// Errors emitted when a handler requests [`ContainerContext`] but extensions were not set up.
 #[derive(Debug, Error)]
 pub enum ContainerContextRejection {
@@ -314,7 +433,8 @@ where
             .cloned()
             .ok_or(ContainerContextRejection::MissingRuntimePlatform)?;
 
-        let metadata = RequestMetadata::from_parts(parts, &platform);
+        let mut metadata = RequestMetadata::from_parts(parts, &platform);
+        metadata.rebuild_raw_url_if_needed();
 
         Ok(Self {
             metadata,
