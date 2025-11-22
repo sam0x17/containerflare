@@ -300,11 +300,10 @@ impl RequestMetadata {
             .map(|url| url.starts_with('/') || !url.contains("://"))
             .unwrap_or(true);
 
-        if needs_rebuild {
-            if let (Some(host), Some(scheme)) = (self.host.as_ref(), self.scheme.as_ref()) {
+        if needs_rebuild
+            && let (Some(host), Some(scheme)) = (self.host.as_ref(), self.scheme.as_ref()) {
                 self.raw_url = Some(format!("{}://{}{}", scheme, host, self.path));
             }
-        }
     }
 }
 
@@ -325,19 +324,17 @@ impl TraceContext {
         let mut sampled = None;
 
         let mut parts = header.split('/');
-        if let Some(trace) = parts.next() {
-            if !trace.is_empty() {
+        if let Some(trace) = parts.next()
+            && !trace.is_empty() {
                 trace_id = Some(trace.to_owned());
             }
-        }
 
         if let Some(rest) = parts.next() {
             let mut rest_parts = rest.split(';');
-            if let Some(span) = rest_parts.next() {
-                if !span.is_empty() {
+            if let Some(span) = rest_parts.next()
+                && !span.is_empty() {
                     span_id = Some(span.to_owned());
                 }
-            }
             for section in rest_parts {
                 if let Some(flag) = section
                     .strip_prefix('o')
@@ -425,11 +422,10 @@ fn pick_client_ip_from_xff(headers: &axum::http::HeaderMap) -> Option<String> {
         if first.is_none() {
             first = Some(part.to_owned());
         }
-        if let Ok(ip) = part.parse::<IpAddr>() {
-            if is_public_ip(&ip) {
+        if let Ok(ip) = part.parse::<IpAddr>()
+            && is_public_ip(&ip) {
                 return Some(part.to_owned());
             }
-        }
     }
     first
 }
