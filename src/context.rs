@@ -69,6 +69,15 @@ pub struct RequestMetadata {
     pub cloud_run_configuration: Option<String>,
     pub cloud_run_region: Option<String>,
     pub trace_context: Option<TraceContext>,
+    pub forwarded_for: Vec<String>,
+    pub forwarded_proto: Option<String>,
+    pub forwarded: Option<String>,
+    pub user_agent: Option<String>,
+    pub accept: Option<String>,
+    pub accept_language: Option<String>,
+    pub accept_encoding: Option<String>,
+    pub sec_gpc: Option<String>,
+    pub client_hints: Option<ClientHints>,
     pub method: String,
     pub path: String,
     pub raw_url: Option<String>,
@@ -91,6 +100,15 @@ impl Default for RequestMetadata {
             cloud_run_configuration: None,
             cloud_run_region: None,
             trace_context: None,
+            forwarded_for: Vec::new(),
+            forwarded_proto: None,
+            forwarded: None,
+            user_agent: None,
+            accept: None,
+            accept_language: None,
+            accept_encoding: None,
+            sec_gpc: None,
+            client_hints: None,
             method: "GET".to_owned(),
             path: "/".to_owned(),
             raw_url: None,
@@ -158,11 +176,26 @@ impl RequestMetadata {
             .clone()
             .unwrap_or_else(|| parts.uri.path().to_owned());
         let raw_url = Some(parts.uri.to_string()).filter(|value| !value.is_empty());
-        let scheme = headers
-            .get("x-forwarded-proto")
-            .and_then(|value| value.to_str().ok())
-            .map(|value| value.to_owned())
+        let forwarded_proto = header_to_string(headers.get("x-forwarded-proto"));
+        let scheme = forwarded_proto
+            .clone()
             .or_else(|| parts.uri.scheme_str().map(|value| value.to_owned()));
+        let forwarded = header_to_string(headers.get("forwarded"));
+        let forwarded_for = header_to_string(headers.get("x-forwarded-for"))
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(|v| v.trim().to_owned())
+                    .filter(|v| !v.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let user_agent = header_to_string(headers.get(axum::http::header::USER_AGENT));
+        let accept = header_to_string(headers.get(axum::http::header::ACCEPT));
+        let accept_language = header_to_string(headers.get(axum::http::header::ACCEPT_LANGUAGE));
+        let accept_encoding = header_to_string(headers.get(axum::http::header::ACCEPT_ENCODING));
+        let sec_gpc = header_to_string(headers.get("sec-gpc"));
+        let client_hints = ClientHints::from_headers(headers);
 
         Self {
             request_id,
@@ -179,6 +212,15 @@ impl RequestMetadata {
             cloud_run_configuration: None,
             cloud_run_region: None,
             trace_context: None,
+            forwarded_for,
+            forwarded_proto,
+            forwarded,
+            user_agent,
+            accept,
+            accept_language,
+            accept_encoding,
+            sec_gpc,
+            client_hints,
             method,
             path,
             raw_url,
@@ -318,6 +360,62 @@ impl TraceContext {
             raw: Some(header.to_owned()),
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct ClientHints {
+    pub ua: Option<String>,
+    pub ua_mobile: Option<String>,
+    pub ua_platform: Option<String>,
+    pub ua_arch: Option<String>,
+    pub ua_platform_version: Option<String>,
+    pub ua_model: Option<String>,
+    pub ua_bitness: Option<String>,
+    pub ua_wow64: Option<String>,
+    pub ua_full_version_list: Option<String>,
+}
+
+impl ClientHints {
+    fn from_headers(headers: &axum::http::HeaderMap) -> Option<Self> {
+        let ua = header_to_string(headers.get("sec-ch-ua"));
+        let ua_mobile = header_to_string(headers.get("sec-ch-ua-mobile"));
+        let ua_platform = header_to_string(headers.get("sec-ch-ua-platform"));
+        let ua_arch = header_to_string(headers.get("sec-ch-ua-arch"));
+        let ua_platform_version = header_to_string(headers.get("sec-ch-ua-platform-version"));
+        let ua_model = header_to_string(headers.get("sec-ch-ua-model"));
+        let ua_bitness = header_to_string(headers.get("sec-ch-ua-bitness"));
+        let ua_wow64 = header_to_string(headers.get("sec-ch-ua-wow64"));
+        let ua_full_version_list = header_to_string(headers.get("sec-ch-ua-full-version-list"));
+
+        if ua.is_none()
+            && ua_mobile.is_none()
+            && ua_platform.is_none()
+            && ua_arch.is_none()
+            && ua_platform_version.is_none()
+            && ua_model.is_none()
+            && ua_bitness.is_none()
+            && ua_wow64.is_none()
+            && ua_full_version_list.is_none()
+        {
+            None
+        } else {
+            Some(Self {
+                ua,
+                ua_mobile,
+                ua_platform,
+                ua_arch,
+                ua_platform_version,
+                ua_model,
+                ua_bitness,
+                ua_wow64,
+                ua_full_version_list,
+            })
+        }
+    }
+}
+
+fn header_to_string(value: Option<&axum::http::HeaderValue>) -> Option<String> {
+    value.and_then(|v| v.to_str().ok().map(|s| s.to_owned()))
 }
 
 fn pick_client_ip_from_xff(headers: &axum::http::HeaderMap) -> Option<String> {
@@ -534,6 +632,9 @@ mod tests {
                 "x-cloud-trace-context",
                 "105445aa7843bc8bf206b120001000/123;o=1",
             )
+            .header("user-agent", "test-agent")
+            .header("accept-language", "en-US")
+            .header("sec-ch-ua", "\"Chromium\";v=\"1\"")
             .body(())
             .unwrap();
 
@@ -550,6 +651,9 @@ mod tests {
         assert_eq!(metadata.host.as_deref(), Some("example.run.app"));
         assert_eq!(metadata.client_ip.as_deref(), Some("198.51.100.1"));
         assert_eq!(metadata.worker_name.as_deref(), Some("svc"));
+        assert_eq!(metadata.user_agent.as_deref(), Some("test-agent"));
+        assert_eq!(metadata.accept_language.as_deref(), Some("en-US"));
+        assert!(metadata.client_hints.is_some());
         assert_eq!(
             metadata.request_id.as_deref(),
             Some("105445aa7843bc8bf206b120001000")
