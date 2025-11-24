@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null | tr -d '\n')}"
 if [[ -z "${PROJECT_ID}" ]]; then
@@ -28,7 +28,7 @@ cd "${REPO_ROOT}"
 
 echo "Building ${IMAGE} using examples/basic/Dockerfile.cloudrun..."
 docker build --platform=linux/amd64 \
-  -f "examples/basic/Dockerfile.cloudrun" \
+  -f "${REPO_ROOT}/examples/basic/Dockerfile.cloudrun" \
   -t "${IMAGE}" \
   "${REPO_ROOT}"
 
