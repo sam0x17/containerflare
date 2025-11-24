@@ -1,6 +1,6 @@
 # Containerflare Basic Example
 
-This example is a standalone Cargo crate that depends on the root `containerflare` crate via a path dependency.
+This example is a standalone Cargo crate that depends on the root `containerflare` crate via a path dependency. It targets both Cloudflare Containers and Google Cloud Run with a single Dockerfile and two helper deploy scripts.
 
 ## Run via Cargo (no container)
 ```bash
@@ -15,7 +15,7 @@ docker run --rm --platform=linux/amd64 -p 8787:8787 containerflare-basic
 curl http://127.0.0.1:8787/      # returns the forwarded RequestMetadata JSON
 ```
 
-`containerflare` binds to `0.0.0.0:8787` by default, so Cloudflare's sidecar (and your local Docker host) can reach the Axum listener without any extra env vars. Set `CF_CONTAINER_ADDR` or `CF_CONTAINER_PORT` if you need a custom binding.
+`containerflare` binds to `0.0.0.0:8787` by default, so Cloudflare's sidecar (and your local Docker host) can reach the Axum listener without any extra env vars. Set `CF_CONTAINER_ADDR` or `CF_CONTAINER_PORT` if you need a custom binding. On Cloud Run, the runtime binds to the injected `PORT` automatically (the same Dockerfile is used for both).
 
 ## Deploy to Cloudflare Containers
 

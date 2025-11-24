@@ -22,9 +22,8 @@ The result feels like developing any other Axum app—only now it runs next to y
   revision / project / trace fields, and disables the host command channel when unavailable.
 - **Command channel client** – talk JSON-over-STDIO (default), TCP, or Unix sockets to the host;
   the IPC layer now ships as the standalone `containerflare-command` crate for direct use.
-- **Production-ready examples** – `examples/basic` demonstrates a full Cloudflare deployment
-  (Worker + Durable Object + container). `examples/cloudrun` mirrors the same Axum app but targets
-  Google Cloud Run with its own Dockerfile + deployment guide.
+- **Production-ready example** – `examples/basic` targets both Cloudflare Containers and Google
+  Cloud Run with the same codebase and Dockerfile.
 
 ## Installation
 
@@ -90,6 +89,10 @@ docker run --rm --platform=linux/amd64 -p 8787:8787 containerflare-basic
 
 # curl echoes the RequestMetadata JSON – easy proof the bridge works
 curl http://127.0.0.1:8787/
+
+# mimic Cloud Run locally (PORT binding)
+docker run --rm --platform=linux/amd64 -p 8080:8080 -e PORT=8080 containerflare-basic
+curl http://127.0.0.1:8080/
 ```
 
 ## Deploying to Cloudflare Containers
@@ -125,11 +128,6 @@ injected `PORT`, captures `K_SERVICE`/`K_REVISION`/`K_CONFIGURATION`/`GOOGLE_CLO
 parses `x-cloud-trace-context`, and disables the host command channel. Handlers can inspect that
 state via `ContainerContext::platform()` and the new Cloud Run fields on `RequestMetadata`.
 
-When `containerflare` detects Cloud Run it binds to the injected `PORT`, captures
-`K_SERVICE`/`K_REVISION`/`K_CONFIGURATION`/`GOOGLE_CLOUD_PROJECT`, parses
-`x-cloud-trace-context`, and disables the host command channel. Handlers can inspect that state via
-`ContainerContext::platform()` and the new Cloud Run fields on `RequestMetadata`.
-
 ## Metadata bridge
 
 The Worker shim (see `examples/basic/worker/index.js`) adds an `x-containerflare-metadata`
@@ -148,7 +146,8 @@ so your Axum handlers continue to receive Cloudflare context.
 On Cloud Run the runtime infers metadata directly from HTTP headers + environment variables. It
 records the service, revision, configuration, project ID, region, trace/span IDs, and whether the
 request is sampled based on the `x-cloud-trace-context` header. These new fields appear on
-`RequestMetadata` alongside the existing Cloudflare values.
+`RequestMetadata` alongside the existing Cloudflare values. Geo fields like `country`/`colo` are
+only populated on Cloudflare because Cloud Run does not provide them.
 
 ## Example project
 
@@ -158,12 +157,10 @@ It ships with:
 - a Dockerfile that builds for `x86_64-unknown-linux-musl`
 - a Worker/Durable Object that forwards metadata and proxies requests
 - deployment scripts and docs for Wrangler v4
+- deploy scripts for Cloud Run that reuse the same Dockerfile
+- first-class support for both Cloudflare and Cloud Run from the same codebase/Dockerfile
 
 Use it as a template for your own containerized Workers.
-
-`examples/cloudrun` mirrors the same pattern but targets Google Cloud Run. It echoes both the
-standard metadata and the detected platform (`ContainerContext::platform()`) so you can see exactly
-which fields are available when running outside Cloudflare.
 
 ## Platform expectations
 
