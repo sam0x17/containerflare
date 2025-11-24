@@ -99,8 +99,8 @@ re-exported by `containerflare` for convenience).
   exposes `bin` example as reference.
 - Provide `containerflare::main(router)` helper macro to hide tokio boilerplate.
 - Provide `examples/basic` showing builder usage, Cloudflare deployment (wrangler), and Cloud Run
-  deployment (Dockerfile + gcloud instructions) from the same codebase via local scripts inside the
-  example directory.
+  deployment (single Dockerfile + gcloud instructions) from the same codebase via local scripts
+  inside the example directory.
 
 ## Iteration Plan
 1. Implement config, runtime, and context scaffolding (MVP; ensures requests can reach Axum

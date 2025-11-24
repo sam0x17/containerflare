@@ -26,9 +26,9 @@ RUST_LOG_VALUE="${RUST_LOG:-info}"
 
 cd "${REPO_ROOT}"
 
-echo "Building ${IMAGE} using examples/basic/Dockerfile.cloudrun..."
+echo "Building ${IMAGE} using examples/basic/Dockerfile..."
 docker build --platform=linux/amd64 \
-  -f "${REPO_ROOT}/examples/basic/Dockerfile.cloudrun" \
+  -f "${REPO_ROOT}/examples/basic/Dockerfile" \
   -t "${IMAGE}" \
   "${REPO_ROOT}"
 

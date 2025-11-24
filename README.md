@@ -116,7 +116,7 @@ curl https://containerflare-basic.<your-account>.workers.dev/
 The same example crate can target Cloud Run. From `examples/basic`:
 
 ```bash
-./deploy_cloudrun.sh       # builds with Dockerfile.cloudrun and runs gcloud run deploy
+./deploy_cloudrun.sh       # builds with Dockerfile and runs gcloud run deploy
 ```
 
 It uses your gcloud defaults for project/region unless overridden (`PROJECT_ID`, `REGION`,

@@ -54,7 +54,7 @@ From this directory:
 ./deploy_cloudrun.sh
 ```
 
-The script builds this example crate using `examples/basic/Dockerfile.cloudrun`, pushes it to
+The script builds this example crate using `examples/basic/Dockerfile`, pushes it to
 `gcr.io/<project>/<service>`, and deploys via `gcloud run deploy` using your gcloud defaults unless
 overridden (`PROJECT_ID`, `REGION`, `SERVICE_NAME`, `TAG`, `RUST_LOG`). `PORT` is injected by Cloud
 Run at runtime and the command channel remains disabled there (`CommandError::Unavailable`).
