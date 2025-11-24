@@ -98,9 +98,9 @@ re-exported by `containerflare` for convenience).
   (`cloudflare-docs/src/content/docs/containers/platform-details/architecture.mdx:79`); crate
   exposes `bin` example as reference.
 - Provide `containerflare::main(router)` helper macro to hide tokio boilerplate.
-- Provide `examples/basic` showing builder usage plus Cloudflare-specific command invocation.
-- Provide `examples/cloudrun` mirroring the same app on Google Cloud Run (Dockerfile + gcloud
-  instructions, metadata bridge demo).
+- Provide `examples/basic` showing builder usage, Cloudflare deployment (wrangler), and Cloud Run
+  deployment (Dockerfile + gcloud instructions) from the same codebase via local scripts inside the
+  example directory.
 
 ## Iteration Plan
 1. Implement config, runtime, and context scaffolding (MVP; ensures requests can reach Axum

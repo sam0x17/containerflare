@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null | tr -d '\n')}"
 if [[ -z "${PROJECT_ID}" ]]; then
@@ -20,24 +20,24 @@ if [[ -z "${REGION}" ]]; then
 fi
 
 SERVICE_NAME="${SERVICE_NAME:-containerflare-cloudrun}"
-IMAGE="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
 TAG="${TAG:-latest}"
-FULL_IMAGE="${IMAGE}:${TAG}"
-
+IMAGE="gcr.io/${PROJECT_ID}/${SERVICE_NAME}:${TAG}"
 RUST_LOG_VALUE="${RUST_LOG:-info}"
 
-echo "Building ${FULL_IMAGE} from ${REPO_ROOT}..."
+cd "${REPO_ROOT}"
+
+echo "Building ${IMAGE} using examples/basic/Dockerfile.cloudrun..."
 docker build --platform=linux/amd64 \
-  -f "${SCRIPT_DIR}/Dockerfile" \
-  -t "${FULL_IMAGE}" \
+  -f "examples/basic/Dockerfile.cloudrun" \
+  -t "${IMAGE}" \
   "${REPO_ROOT}"
 
-echo "Pushing ${FULL_IMAGE}..."
-docker push "${FULL_IMAGE}"
+echo "Pushing ${IMAGE}..."
+docker push "${IMAGE}"
 
 echo "Deploying ${SERVICE_NAME} to region ${REGION}..."
 gcloud run deploy "${SERVICE_NAME}" \
-  --image="${FULL_IMAGE}" \
+  --image="${IMAGE}" \
   --project="${PROJECT_ID}" \
   --region="${REGION}" \
   --platform=managed \

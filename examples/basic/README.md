@@ -7,7 +7,7 @@ This example is a standalone Cargo crate that depends on the root `containerflar
 cargo run -p containerflare-basic-example
 ```
 
-## Build & Run Locally
+## Build & Run Locally (Cloudflare-style container)
 ```bash
 docker build --platform=linux/amd64 -f examples/basic/Dockerfile -t containerflare-basic .
 # run the amd64 image under qemu (if host != amd64)
@@ -18,21 +18,14 @@ curl http://127.0.0.1:8787/      # returns the forwarded RequestMetadata JSON
 `containerflare` binds to `0.0.0.0:8787` by default, so Cloudflare's sidecar (and your local Docker host) can reach the Axum listener without any extra env vars. Set `CF_CONTAINER_ADDR` or `CF_CONTAINER_PORT` if you need a custom binding.
 
 ## Deploy to Cloudflare Containers
-1. Install the Worker adapter dependencies (first run only):
-   ```bash
-   cd examples/basic
-   npm install
-   ```
-2. Authenticate Wrangler (only needed once per machine/account):
-   ```bash
-   npx wrangler login           # or export CLOUDFLARE_API_TOKEN=...
-   ```
-3. Deploy via Wrangler (Docker must be running). The config sets `image_build_context = "../.."` so the full workspace is available to the Docker build:
-   ```bash
-   npx wrangler deploy
-   ```
 
-`wrangler deploy` builds the Docker image, pushes it to Cloudflare's registry, and deploys the Worker/Durable Object that proxies requests into the Axum server running inside the container.
+From this directory:
+```bash
+./deploy_cloudflare.sh
+```
+
+`deploy_cloudflare.sh` runs `wrangler deploy` inside `examples/basic`, building/pushing the Docker
+image and deploying the Worker/Durable Object that proxies requests into the Axum server.
 
 ## Test in Cloudflare
 After deployment, Wrangler prints a `workers.dev` URL. Exercise the Worker/Container pair and watch logs:
@@ -53,3 +46,15 @@ When you're done, `npx wrangler deployments list` shows previous versions and `n
 
 ## Metadata From Workers
 `containerflare` expects Cloudflare-specific request details in the `x-containerflare-metadata` header. The provided Worker populates it (see `worker/index.js`) with the request ID, colo/region/country, client IP, worker name (`CONTAINERFLARE_WORKER` from `wrangler.toml`), and the full URL/method before proxying the request into the container. Inside Rust handlers you can read those values via `ContainerContext::metadata()`. If you adjust the Worker, keep writing this header so your Axum code retains access to Cloudflare context.
+
+## Deploy to Google Cloud Run
+
+From this directory:
+```bash
+./deploy_cloudrun.sh
+```
+
+The script builds this example crate using `examples/basic/Dockerfile.cloudrun`, pushes it to
+`gcr.io/<project>/<service>`, and deploys via `gcloud run deploy` using your gcloud defaults unless
+overridden (`PROJECT_ID`, `REGION`, `SERVICE_NAME`, `TAG`, `RUST_LOG`). `PORT` is injected by Cloud
+Run at runtime and the command channel remains disabled there (`CommandError::Unavailable`).

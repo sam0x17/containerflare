@@ -94,11 +94,10 @@ curl http://127.0.0.1:8787/
 
 ## Deploying to Cloudflare Containers
 
+From `examples/basic`, run:
+
 ```bash
-cd examples/basic
-npm install                         # installs Wrangler v4 and @cloudflare/containers
-npx wrangler login                  # or export CLOUDFLARE_API_TOKEN=...
-npx wrangler deploy                 # builds + pushes the Docker image and Worker
+./deploy_cloudflare.sh     # runs wrangler deploy from examples/basic
 ```
 
 The example’s `wrangler.toml` sets `image_build_context = "../.."`, so the Docker build sees
@@ -114,23 +113,17 @@ curl https://containerflare-basic.<your-account>.workers.dev/
 
 ## Deploying to Google Cloud Run
 
-Google Cloud Run support lives under `examples/cloudrun`. The example is a normal Cargo crate +
-Dockerfile that you can run locally or deploy via `gcloud`:
+The same example crate can target Cloud Run. From `examples/basic`:
 
 ```bash
-cd examples/cloudrun
-cargo run -p containerflare-cloudrun-example          # binds to 8787 locally
-
-# build the Cloud Run container
-docker build --platform=linux/amd64 -f Dockerfile -t containerflare-cloudrun .
-PORT=8080 docker run --rm -p 8080:8080 -e PORT=8080 containerflare-cloudrun
-
-# deploy (full gcloud instructions live in examples/cloudrun/README.md)
+./deploy_cloudrun.sh       # builds with Dockerfile.cloudrun and runs gcloud run deploy
 ```
 
-Prefer a one-liner? `examples/cloudrun/deploy.sh` builds, pushes, and deploys using your active
-`gcloud` project/region—override `PROJECT_ID`, `REGION`, or `SERVICE_NAME` if needed before running
-it.
+It uses your gcloud defaults for project/region unless overridden (`PROJECT_ID`, `REGION`,
+`SERVICE_NAME`, `TAG`, `RUST_LOG`). When `containerflare` detects Cloud Run it binds to the
+injected `PORT`, captures `K_SERVICE`/`K_REVISION`/`K_CONFIGURATION`/`GOOGLE_CLOUD_PROJECT`,
+parses `x-cloud-trace-context`, and disables the host command channel. Handlers can inspect that
+state via `ContainerContext::platform()` and the new Cloud Run fields on `RequestMetadata`.
 
 When `containerflare` detects Cloud Run it binds to the injected `PORT`, captures
 `K_SERVICE`/`K_REVISION`/`K_CONFIGURATION`/`GOOGLE_CLOUD_PROJECT`, parses
