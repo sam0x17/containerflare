@@ -10,4 +10,4 @@ keywords.workspace = true
 [dependencies]
 axum = "0.7"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-containerflare = { path = "../..", version = "0.1.0" }
+containerflare = { workspace = true }
