@@ -26,7 +26,10 @@ RUN addgroup -S containerflare && adduser -S containerflare -G containerflare
 
 COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/containerflare-basic-example /usr/local/bin/containerflare-basic
 
+# Cloudflare Containers default to 8787; Cloud Run injects PORT (usually 8080).
 EXPOSE 8787
+EXPOSE 8080
+
 USER containerflare
 ENV RUST_LOG=info \
     CF_CONTAINER_ADDR=0.0.0.0

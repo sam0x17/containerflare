@@ -32,6 +32,8 @@ pub enum CommandEndpoint {
     #[cfg(unix)]
     UnixSocket(PathBuf),
     Tcp(String),
+    /// Marker used when the runtime intentionally disables the command channel.
+    Unavailable,
 }
 
 impl FromStr for CommandEndpoint {
@@ -41,6 +43,10 @@ impl FromStr for CommandEndpoint {
         let value = s.trim();
         if value.eq_ignore_ascii_case("stdio") {
             return Ok(CommandEndpoint::Stdio);
+        }
+
+        if value.eq_ignore_ascii_case("disabled") || value.eq_ignore_ascii_case("unavailable") {
+            return Ok(CommandEndpoint::Unavailable);
         }
 
         #[cfg(unix)]
@@ -164,6 +170,11 @@ impl CommandClient {
                     CommandReader::Unix(Mutex::new(BufReader::new(read_half))),
                 )
             }
+            CommandEndpoint::Unavailable => {
+                return Err(CommandError::Unavailable(
+                    "command endpoint marked unavailable".into(),
+                ));
+            }
         };
 
         Ok(Self {
@@ -174,6 +185,23 @@ impl CommandClient {
                 timeout,
             }),
         })
+    }
+
+    /// Creates a [`CommandClient`] that always reports an unavailable channel.
+    ///
+    /// This is useful for runtimes (Google Cloud Run, local testing, etc.) that do not expose
+    /// a host-managed command bus but still want to share the API surface.
+    pub fn unavailable(reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        let shared = Arc::new(reason);
+        Self {
+            inner: Arc::new(CommandClientInner {
+                endpoint: CommandEndpoint::Unavailable,
+                writer: CommandWriter::Unavailable(shared.clone()),
+                reader: CommandReader::Unavailable(shared),
+                timeout: DEFAULT_COMMAND_TIMEOUT,
+            }),
+        }
     }
 
     /// Returns the endpoint backing this client.
@@ -280,6 +308,8 @@ pub enum CommandError {
     Io(#[from] io::Error),
     #[error("invalid command payload: {0}")]
     Serialization(#[from] serde_json::Error),
+    #[error("command channel unavailable: {0}")]
+    Unavailable(String),
 }
 
 #[derive(Debug)]
@@ -288,6 +318,7 @@ enum CommandWriter {
     Tcp(Mutex<TcpOwnedWriteHalf>),
     #[cfg(unix)]
     Unix(Mutex<UnixOwnedWriteHalf>),
+    Unavailable(Arc<String>),
 }
 
 #[derive(Debug)]
@@ -296,6 +327,7 @@ enum CommandReader {
     Tcp(Mutex<BufReader<TcpOwnedReadHalf>>),
     #[cfg(unix)]
     Unix(Mutex<BufReader<UnixOwnedReadHalf>>),
+    Unavailable(Arc<String>),
 }
 
 impl CommandWriter {
@@ -306,6 +338,9 @@ impl CommandWriter {
             CommandWriter::Tcp(writer) => Self::write_line(writer, &line).await,
             #[cfg(unix)]
             CommandWriter::Unix(writer) => Self::write_line(writer, &line).await,
+            CommandWriter::Unavailable(reason) => {
+                Err(CommandError::Unavailable(reason.as_ref().clone()))
+            }
         }
     }
 
@@ -328,6 +363,9 @@ impl CommandReader {
             CommandReader::Tcp(reader) => Self::read_line(reader).await,
             #[cfg(unix)]
             CommandReader::Unix(reader) => Self::read_line(reader).await,
+            CommandReader::Unavailable(reason) => {
+                Err(CommandError::Unavailable(reason.as_ref().clone()))
+            }
         }
     }
 
