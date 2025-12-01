@@ -27,7 +27,7 @@ members = ["containerflare-command",
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/sam0x17/containerflare"
@@ -35,4 +35,4 @@ keywords = ["cloudflare", "workers", "runtime", "containers", "serverless"]
 
 [workspace.dependencies]
 containerflare = { path = "." }
-containerflare-command = { path = "containerflare-command", version = "0.1.0" }
+containerflare-command = { path = "containerflare-command", version = "0.2.0" }
