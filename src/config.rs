@@ -24,7 +24,7 @@ pub struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
-    /// Loads configuration from Cloudflare-supplied `CF_*` environment variables.
+    /// Loads configuration from Cloudflare-supplied `CF_*` variables and Cloud Run's `PORT`.
     ///
     /// Values from a local `.env` file (parsed via [`dotenvy::dotenv_override`]) override whatever is already set in
     /// the process environment, which makes local development workflows predictable.
@@ -73,7 +73,8 @@ impl RuntimeConfig {
 }
 
 impl Default for RuntimeConfig {
-    /// Binds to `0.0.0.0:8787` and talks to the host over stdio.
+    /// Binds to `0.0.0.0` with the resolved port (prefers `PORT`, then `CF_CONTAINER_PORT`, otherwise `8787`)
+    /// and talks to the host over stdio.
     fn default() -> Self {
         // Default matches the local Cloudflare containers sidecar contract.
         Self {

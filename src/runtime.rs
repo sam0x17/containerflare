@@ -6,7 +6,7 @@ use crate::config::RuntimeConfig;
 use crate::error::Result;
 use containerflare_command::CommandClient;
 
-/// High-level runtime that wires an Axum router into Cloudflare's container environment.
+/// High-level runtime that wires an Axum router into Cloudflare Containers (and adapts to Cloud Run when detected).
 pub struct ContainerflareRuntime {
     config: RuntimeConfig,
 }

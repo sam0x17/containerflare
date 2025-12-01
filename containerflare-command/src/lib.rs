@@ -71,7 +71,7 @@ pub enum CommandEndpointParseError {
     InvalidCommandEndpoint(String),
 }
 
-/// High-level client that talks to Cloudflare's host-managed command channel.
+/// High-level client that talks to Cloudflare's host-managed command channel (Cloud Run does not expose one).
 ///
 /// Commands are framed as JSON lines and travel over stdin/stdout (default), TCP, or
 /// Unix sockets (when enabled). Responses are deserialized back into [`CommandResponse`]
