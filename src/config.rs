@@ -171,7 +171,7 @@ fn resolve_port(platform: &RuntimePlatform) -> u16 {
                 .ok()
                 .and_then(|value| value.parse::<u16>().ok())
         })
-        .unwrap_or_else(|| match platform {
+        .unwrap_or(match platform {
             RuntimePlatform::CloudRun(_) => DEFAULT_CLOUD_RUN_PORT,
             _ => DEFAULT_CLOUDFLARE_PORT,
         })

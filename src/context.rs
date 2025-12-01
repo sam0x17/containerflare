@@ -320,7 +320,7 @@ impl RequestMetadata {
             let trace = TraceContext::from_cloud_trace_header(
                 value,
                 self.platform_project_id()
-                    .or_else(|| platform.project_id.as_deref()),
+                    .or(platform.project_id.as_deref()),
             );
             if self.request_id.is_none() {
                 self.request_id = trace.trace_id.clone();
@@ -387,7 +387,7 @@ impl RequestMetadata {
     }
 
     fn platform_project_id(&self) -> Option<&str> {
-        self.project_id.as_deref().or_else(|| match &self.platform {
+        self.project_id.as_deref().or(match &self.platform {
             Some(RequestMetadataPlatform::CloudRun { project_id, .. }) => project_id.as_deref(),
             Some(RequestMetadataPlatform::Cloudflare { .. }) | None => None,
         })
