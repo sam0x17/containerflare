@@ -11,6 +11,8 @@ use crate::platform::RuntimePlatform;
 const DEFAULT_CLOUDFLARE_PORT: u16 = 8787;
 const DEFAULT_CLOUD_RUN_PORT: u16 = 8080;
 const CLOUD_RUN_COMMAND_REASON: &str = "host command channel is not available on Google Cloud Run";
+const PORT_ENV: &str = "PORT";
+const LEGACY_PORT_ENV: &str = "CF_CONTAINER_PORT";
 
 /// Configuration consumed by the runtime before spinning up Axum/hyper.
 #[derive(Clone, Debug)]
@@ -31,18 +33,7 @@ impl RuntimeConfig {
 
         let platform = RuntimePlatform::detect();
 
-        let port = env::var("CF_CONTAINER_PORT")
-            .ok()
-            .and_then(|value| value.parse::<u16>().ok())
-            .or_else(|| {
-                env::var("PORT")
-                    .ok()
-                    .and_then(|value| value.parse::<u16>().ok())
-            })
-            .unwrap_or(match platform {
-                RuntimePlatform::CloudRun(_) => DEFAULT_CLOUD_RUN_PORT,
-                _ => DEFAULT_CLOUDFLARE_PORT,
-            });
+        let port = resolve_port(&platform);
 
         let addr = env::var("CF_CONTAINER_ADDR")
             .ok()
@@ -86,7 +77,10 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         // Default matches the local Cloudflare containers sidecar contract.
         Self {
-            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_CLOUDFLARE_PORT),
+            bind_addr: SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                resolve_port(&RuntimePlatform::default()),
+            ),
             platform: RuntimePlatform::default(),
             command_endpoint: Some(CommandEndpoint::Stdio),
             command_disabled_reason: None,
@@ -133,6 +127,7 @@ impl RuntimeConfigBuilder {
     /// Builds the final configuration.
     pub fn build(self) -> RuntimeConfig {
         let command_disabled_reason = self.command_disabled_reason;
+        let platform = self.platform.unwrap_or_default();
         let command_endpoint = if command_disabled_reason.is_some() {
             None
         } else {
@@ -141,9 +136,9 @@ impl RuntimeConfigBuilder {
 
         RuntimeConfig {
             bind_addr: self.bind_addr.unwrap_or_else(|| {
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_CLOUDFLARE_PORT)
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), resolve_port(&platform))
             }),
-            platform: self.platform.unwrap_or_default(),
+            platform,
             command_endpoint,
             command_disabled_reason,
         }
@@ -165,6 +160,21 @@ fn load_env_overrides() -> Result<(), ConfigError> {
         Err(err) if err.not_found() => Ok(()),
         Err(err) => Err(ConfigError::Dotenv(err)),
     }
+}
+
+fn resolve_port(platform: &RuntimePlatform) -> u16 {
+    env::var(PORT_ENV)
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .or_else(|| {
+            env::var(LEGACY_PORT_ENV)
+                .ok()
+                .and_then(|value| value.parse::<u16>().ok())
+        })
+        .unwrap_or_else(|| match platform {
+            RuntimePlatform::CloudRun(_) => DEFAULT_CLOUD_RUN_PORT,
+            _ => DEFAULT_CLOUDFLARE_PORT,
+        })
 }
 
 #[cfg(test)]

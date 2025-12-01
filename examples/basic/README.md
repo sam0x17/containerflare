@@ -13,9 +13,13 @@ docker build --platform=linux/amd64 -f examples/basic/Dockerfile -t containerfla
 # run the amd64 image under qemu (if host != amd64)
 docker run --rm --platform=linux/amd64 -p 8787:8787 containerflare-basic
 curl http://127.0.0.1:8787/      # returns the forwarded RequestMetadata JSON
+
+# change the listener port
+docker run --rm --platform=linux/amd64 -p 8080:8080 -e PORT=8080 containerflare-basic
+curl http://127.0.0.1:8080/
 ```
 
-`containerflare` binds to `0.0.0.0:8787` by default, so Cloudflare's sidecar (and your local Docker host) can reach the Axum listener without any extra env vars. Set `CF_CONTAINER_ADDR` or `CF_CONTAINER_PORT` if you need a custom binding. On Cloud Run, the runtime binds to the injected `PORT` automatically (the same Dockerfile is used for both).
+`containerflare` binds to `PORT` when set, otherwise `CF_CONTAINER_PORT`, falling back to `0.0.0.0:8787` so Cloudflare's sidecar (and your local Docker host) can reach the Axum listener without extra env vars. The same Dockerfile is used for both Cloudflare and Cloud Run.
 
 ## Deploy to Cloudflare Containers
 
@@ -56,5 +60,7 @@ From this directory:
 
 The script builds this example crate using `examples/basic/Dockerfile`, pushes it to
 `gcr.io/<project>/<service>`, and deploys via `gcloud run deploy` using your gcloud defaults unless
-overridden (`PROJECT_ID`, `REGION`, `SERVICE_NAME`, `TAG`, `RUST_LOG`). `PORT` is injected by Cloud
-Run at runtime and the command channel remains disabled there (`CommandError::Unavailable`).
+overridden (`PROJECT_ID`, `REGION`, `SERVICE_NAME`, `TAG`, `RUST_LOG`). It defaults to
+**disallowing unauthenticated** traffic; pass `--allow-unauthenticated` (or `ALLOW_UNAUTH=true`) to
+opt in. `PORT` is injected by Cloud Run at runtime and the command channel remains disabled there
+(`CommandError::Unavailable`).

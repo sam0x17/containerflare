@@ -11,7 +11,9 @@ pub mod platform;
 pub mod runtime;
 
 pub use crate::config::{RuntimeConfig, RuntimeConfigBuilder};
-pub use crate::context::{ContainerContext, RequestMetadata, TraceContext};
+pub use crate::context::{
+    ContainerContext, RequestMetadata, RequestMetadataPlatform, TraceContext,
+};
 pub use crate::error::{ContainerflareError, Result};
 pub use crate::platform::{CloudRunPlatform, CloudflarePlatform, RuntimePlatform};
 pub use crate::runtime::{ContainerflareRuntime, run, serve};

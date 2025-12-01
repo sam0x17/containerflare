@@ -60,11 +60,10 @@ async fn metadata(ctx: ContainerContext) -> Json<RequestMetadata> {
   the client reports `CommandError::Unavailable` so you can log or fall back gracefully.
 
 Run the binary inside your container image. Cloudflare will proxy HTTP traffic from the
-Worker/Durable Object to the listener bound by `containerflare` (defaults to `0.0.0.0:8787`).
-Override `CF_CONTAINER_ADDR`/`CF_CONTAINER_PORT` if you need something else locally. On Cloud Run
-the runtime automatically binds to the provided `PORT` (defaulting to 8080 when running the sample
-Dockerfile locally). Use `CF_CMD_ENDPOINT` when pointing the command client at a TCP or Unix socket
-shim.
+Worker/Durable Object to the listener bound by `containerflare` (binds to `PORT` when set, otherwise
+`CF_CONTAINER_PORT`, falling back to `0.0.0.0:8787` for the Cloudflare sidecar). Override
+`CF_CONTAINER_ADDR` for a custom interface. Use `CF_CMD_ENDPOINT` when pointing the command client
+at a TCP or Unix socket shim.
 
 ## Standalone command crate
 
@@ -90,7 +89,7 @@ docker run --rm --platform=linux/amd64 -p 8787:8787 containerflare-basic
 # curl echoes the RequestMetadata JSON – easy proof the bridge works
 curl http://127.0.0.1:8787/
 
-# mimic Cloud Run locally (PORT binding)
+# customize the listener
 docker run --rm --platform=linux/amd64 -p 8080:8080 -e PORT=8080 containerflare-basic
 curl http://127.0.0.1:8080/
 ```
@@ -123,8 +122,10 @@ The same example crate can target Cloud Run. From `examples/basic`:
 ```
 
 It uses your gcloud defaults for project/region unless overridden (`PROJECT_ID`, `REGION`,
-`SERVICE_NAME`, `TAG`, `RUST_LOG`). When `containerflare` detects Cloud Run it binds to the
-injected `PORT`, captures `K_SERVICE`/`K_REVISION`/`K_CONFIGURATION`/`GOOGLE_CLOUD_PROJECT`,
+`SERVICE_NAME`, `TAG`, `RUST_LOG`). By default the script deploys **without** allowing
+unauthenticated traffic; pass `--allow-unauthenticated` (or `ALLOW_UNAUTH=true`) to opt in. When
+`containerflare` detects Cloud Run it binds to the injected `PORT`, captures
+`K_SERVICE`/`K_REVISION`/`K_CONFIGURATION`/`GOOGLE_CLOUD_PROJECT`,
 parses `x-cloud-trace-context`, and disables the host command channel. Handlers can inspect that
 state via `ContainerContext::platform()` and the new Cloud Run fields on `RequestMetadata`.
 
@@ -167,10 +168,9 @@ Use it as a template for your own containerized Workers.
 - Cloudflare currently expects Containers to be built for the `linux/amd64` architecture, so we
   target `x86_64-unknown-linux-musl` by default. You could just as easily use a debian/ubuntu
   based image, however alpine/musl is great for small container sizes.
-- The runtime binds to `0.0.0.0:8787` so the Cloudflare sidecar (which connects from
-  `10.0.0.1`) can reach your Axum listener. Override `CF_CONTAINER_ADDR` / `CF_CONTAINER_PORT`
-  for custom setups. On Cloud Run the runtime binds to the injected `PORT` (usually 8080 when
-  running locally).
+- The runtime binds to `PORT` when provided (Cloud Run injects it), otherwise falls back to
+  `CF_CONTAINER_PORT` or `0.0.0.0:8787` so the Cloudflare sidecar (which connects from `10.0.0.1`)
+  can reach your Axum listener. Override `CF_CONTAINER_ADDR` for custom setups.
 - The `CommandClient` speaks JSON-over-STDIO for now. When Cloudflare documents additional
   transports we can add typed helpers on top of it. Cloud Run disables the channel, so the client
   immediately returns `CommandError::Unavailable`.

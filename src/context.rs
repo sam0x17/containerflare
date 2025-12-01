@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use axum::extract::FromRequestParts;
 use axum::http::StatusCode;
+use axum::http::header::{
+    ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, FORWARDED, HOST, HeaderName, USER_AGENT,
+};
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
@@ -13,6 +16,16 @@ use crate::platform::{CloudRunPlatform, CloudflarePlatform, RuntimePlatform};
 
 /// Header set by the Worker shim that carries Cloudflare-specific request metadata.
 const METADATA_HEADER: &str = "x-containerflare-metadata";
+const HEADER_CF_RAY: HeaderName = HeaderName::from_static("cf-ray");
+const HEADER_CF_COLO: HeaderName = HeaderName::from_static("cf-colo");
+const HEADER_CF_IPCOUNTRY: HeaderName = HeaderName::from_static("cf-ipcountry");
+const HEADER_CF_REGION: HeaderName = HeaderName::from_static("cf-region");
+const HEADER_CF_CONNECTING_IP: HeaderName = HeaderName::from_static("cf-connecting-ip");
+const HEADER_X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
+const HEADER_X_FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-host");
+const HEADER_X_FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
+const HEADER_X_CLOUD_TRACE_CONTEXT: HeaderName = HeaderName::from_static("x-cloud-trace-context");
+const HEADER_SEC_GPC: HeaderName = HeaderName::from_static("sec-gpc");
 
 /// Request-scoped handle that exposes platform-specific request metadata plus the host command
 /// client.
@@ -53,6 +66,21 @@ impl ContainerContext {
 /// When running on Google Cloud Run the `cloud_run_*`, `project_id`, and `trace_context` fields
 /// are populated automatically from the platform metadata and `x-cloud-trace-context` header.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "platform", rename_all = "snake_case")]
+pub enum RequestMetadataPlatform {
+    Cloudflare {
+        worker_name: Option<String>,
+    },
+    CloudRun {
+        service: Option<String>,
+        revision: Option<String>,
+        configuration: Option<String>,
+        project_id: Option<String>,
+        region: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RequestMetadata {
     pub request_id: Option<String>,
@@ -62,6 +90,7 @@ pub struct RequestMetadata {
     pub client_ip: Option<String>,
     pub host: Option<String>,
     pub scheme: Option<String>,
+    pub platform: Option<RequestMetadataPlatform>,
     pub worker_name: Option<String>,
     pub project_id: Option<String>,
     pub cloud_run_service: Option<String>,
@@ -93,6 +122,7 @@ impl Default for RequestMetadata {
             client_ip: None,
             host: None,
             scheme: None,
+            platform: None,
             worker_name: None,
             project_id: None,
             cloud_run_service: None,
@@ -119,20 +149,13 @@ impl Default for RequestMetadata {
 impl RequestMetadata {
     /// Builds metadata from either the shim header or fallbacks for local testing.
     fn from_parts(parts: &Parts, platform: &RuntimePlatform) -> Self {
-        if let Some(metadata) = Self::from_metadata_header(parts) {
-            return metadata;
-        }
+        let mut metadata = if let Some(metadata) = Self::from_metadata_header(parts) {
+            metadata
+        } else {
+            Self::from_headers(parts)
+        };
 
-        let mut metadata = Self::from_headers(parts);
-
-        if let Some(cf) = platform.as_cloudflare() {
-            metadata.apply_cloudflare_defaults(cf);
-        }
-
-        if let Some(run) = platform.as_cloud_run() {
-            metadata.apply_cloud_run_defaults(parts, run);
-        }
-
+        metadata.apply_platform_defaults(parts, platform);
         metadata
     }
 
@@ -144,29 +167,15 @@ impl RequestMetadata {
 
     fn from_headers(parts: &Parts) -> Self {
         let headers = &parts.headers;
-        let request_id = headers
-            .get("cf-ray")
-            .and_then(|value| value.to_str().ok())
-            .map(|value| value.to_owned());
-        let colo = headers
-            .get("cf-colo")
-            .and_then(|value| value.to_str().ok())
-            .map(|value| value.to_owned());
-        let country = headers
-            .get("cf-ipcountry")
-            .and_then(|value| value.to_str().ok())
-            .map(|value| value.to_owned());
-        let region = headers
-            .get("cf-region")
-            .and_then(|value| value.to_str().ok())
-            .map(|value| value.to_owned());
-        let client_ip = headers
-            .get("cf-connecting-ip")
-            .and_then(|value| value.to_str().ok().map(|v| v.to_owned()))
+        let request_id = header_to_string(headers, &HEADER_CF_RAY);
+        let colo = header_to_string(headers, &HEADER_CF_COLO);
+        let country = header_to_string(headers, &HEADER_CF_IPCOUNTRY);
+        let region = header_to_string(headers, &HEADER_CF_REGION);
+        let client_ip = header_to_string(headers, &HEADER_CF_CONNECTING_IP)
             .or_else(|| pick_client_ip_from_xff(headers));
         let host = headers
-            .get("x-forwarded-host")
-            .or_else(|| headers.get(axum::http::header::HOST))
+            .get(&HEADER_X_FORWARDED_HOST)
+            .or_else(|| headers.get(HOST))
             .and_then(|value| value.to_str().ok())
             .map(|value| value.to_owned());
 
@@ -176,12 +185,12 @@ impl RequestMetadata {
             .clone()
             .unwrap_or_else(|| parts.uri.path().to_owned());
         let raw_url = Some(parts.uri.to_string()).filter(|value| !value.is_empty());
-        let forwarded_proto = header_to_string(headers.get("x-forwarded-proto"));
+        let forwarded_proto = header_to_string(headers, &HEADER_X_FORWARDED_PROTO);
         let scheme = forwarded_proto
             .clone()
             .or_else(|| parts.uri.scheme_str().map(|value| value.to_owned()));
-        let forwarded = header_to_string(headers.get("forwarded"));
-        let forwarded_for = header_to_string(headers.get("x-forwarded-for"))
+        let forwarded = header_to_string(headers, &FORWARDED);
+        let forwarded_for = header_to_string(headers, &HEADER_X_FORWARDED_FOR)
             .map(|value| {
                 value
                     .split(',')
@@ -190,11 +199,11 @@ impl RequestMetadata {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let user_agent = header_to_string(headers.get(axum::http::header::USER_AGENT));
-        let accept = header_to_string(headers.get(axum::http::header::ACCEPT));
-        let accept_language = header_to_string(headers.get(axum::http::header::ACCEPT_LANGUAGE));
-        let accept_encoding = header_to_string(headers.get(axum::http::header::ACCEPT_ENCODING));
-        let sec_gpc = header_to_string(headers.get("sec-gpc"));
+        let user_agent = header_to_string(headers, &USER_AGENT);
+        let accept = header_to_string(headers, &ACCEPT);
+        let accept_language = header_to_string(headers, &ACCEPT_LANGUAGE);
+        let accept_encoding = header_to_string(headers, &ACCEPT_ENCODING);
+        let sec_gpc = header_to_string(headers, &HEADER_SEC_GPC);
         let client_hints = ClientHints::from_headers(headers);
 
         Self {
@@ -205,6 +214,7 @@ impl RequestMetadata {
             client_ip,
             host,
             scheme,
+            platform: None,
             worker_name: None,
             project_id: None,
             cloud_run_service: None,
@@ -227,10 +237,34 @@ impl RequestMetadata {
         }
     }
 
+    fn apply_platform_defaults(&mut self, parts: &Parts, platform: &RuntimePlatform) {
+        if let Some(cf) = platform.as_cloudflare() {
+            self.apply_cloudflare_defaults(cf);
+        }
+
+        if let Some(run) = platform.as_cloud_run() {
+            self.apply_cloud_run_defaults(parts, run);
+        }
+    }
+
     fn apply_cloudflare_defaults(&mut self, platform: &CloudflarePlatform) {
         if self.worker_name.is_none() {
             self.worker_name = platform.worker_name.clone();
         }
+
+        self.platform = match self.platform.take() {
+            Some(RequestMetadataPlatform::Cloudflare { mut worker_name }) => {
+                if worker_name.is_none() {
+                    worker_name = self.worker_name.clone();
+                }
+                Some(RequestMetadataPlatform::Cloudflare { worker_name })
+            }
+            Some(RequestMetadataPlatform::CloudRun { .. }) | None => {
+                Some(RequestMetadataPlatform::Cloudflare {
+                    worker_name: self.worker_name.clone(),
+                })
+            }
+        };
     }
 
     fn apply_cloud_run_defaults(&mut self, parts: &Parts, platform: &CloudRunPlatform) {
@@ -280,16 +314,61 @@ impl RequestMetadata {
 
         if let Some(value) = parts
             .headers
-            .get("x-cloud-trace-context")
+            .get(&HEADER_X_CLOUD_TRACE_CONTEXT)
             .and_then(|header| header.to_str().ok())
         {
-            let trace =
-                TraceContext::from_cloud_trace_header(value, platform.project_id.as_deref());
+            let trace = TraceContext::from_cloud_trace_header(
+                value,
+                self.platform_project_id()
+                    .or_else(|| platform.project_id.as_deref()),
+            );
             if self.request_id.is_none() {
                 self.request_id = trace.trace_id.clone();
             }
             self.trace_context = Some(trace);
         }
+
+        self.platform = match self.platform.take() {
+            Some(RequestMetadataPlatform::CloudRun {
+                mut service,
+                mut revision,
+                mut configuration,
+                mut project_id,
+                mut region,
+            }) => {
+                if service.is_none() {
+                    service = self.cloud_run_service.clone();
+                }
+                if revision.is_none() {
+                    revision = self.cloud_run_revision.clone();
+                }
+                if configuration.is_none() {
+                    configuration = self.cloud_run_configuration.clone();
+                }
+                if project_id.is_none() {
+                    project_id = self.project_id.clone();
+                }
+                if region.is_none() {
+                    region = self.cloud_run_region.clone();
+                }
+                Some(RequestMetadataPlatform::CloudRun {
+                    service,
+                    revision,
+                    configuration,
+                    project_id,
+                    region,
+                })
+            }
+            Some(RequestMetadataPlatform::Cloudflare { .. }) | None => {
+                Some(RequestMetadataPlatform::CloudRun {
+                    service: self.cloud_run_service.clone(),
+                    revision: self.cloud_run_revision.clone(),
+                    configuration: self.cloud_run_configuration.clone(),
+                    project_id: self.project_id.clone(),
+                    region: self.cloud_run_region.clone(),
+                })
+            }
+        };
     }
 
     /// Attempts to rebuild the raw URL using scheme + host + path when only a path was available.
@@ -305,6 +384,13 @@ impl RequestMetadata {
         {
             self.raw_url = Some(format!("{}://{}{}", scheme, host, self.path));
         }
+    }
+
+    fn platform_project_id(&self) -> Option<&str> {
+        self.project_id.as_deref().or_else(|| match &self.platform {
+            Some(RequestMetadataPlatform::CloudRun { project_id, .. }) => project_id.as_deref(),
+            Some(RequestMetadataPlatform::Cloudflare { .. }) | None => None,
+        })
     }
 }
 
@@ -377,15 +463,16 @@ pub struct ClientHints {
 
 impl ClientHints {
     fn from_headers(headers: &axum::http::HeaderMap) -> Option<Self> {
-        let ua = header_to_string(headers.get("sec-ch-ua"));
-        let ua_mobile = header_to_string(headers.get("sec-ch-ua-mobile"));
-        let ua_platform = header_to_string(headers.get("sec-ch-ua-platform"));
-        let ua_arch = header_to_string(headers.get("sec-ch-ua-arch"));
-        let ua_platform_version = header_to_string(headers.get("sec-ch-ua-platform-version"));
-        let ua_model = header_to_string(headers.get("sec-ch-ua-model"));
-        let ua_bitness = header_to_string(headers.get("sec-ch-ua-bitness"));
-        let ua_wow64 = header_to_string(headers.get("sec-ch-ua-wow64"));
-        let ua_full_version_list = header_to_string(headers.get("sec-ch-ua-full-version-list"));
+        let ua = header_value_to_string(headers.get("sec-ch-ua"));
+        let ua_mobile = header_value_to_string(headers.get("sec-ch-ua-mobile"));
+        let ua_platform = header_value_to_string(headers.get("sec-ch-ua-platform"));
+        let ua_arch = header_value_to_string(headers.get("sec-ch-ua-arch"));
+        let ua_platform_version = header_value_to_string(headers.get("sec-ch-ua-platform-version"));
+        let ua_model = header_value_to_string(headers.get("sec-ch-ua-model"));
+        let ua_bitness = header_value_to_string(headers.get("sec-ch-ua-bitness"));
+        let ua_wow64 = header_value_to_string(headers.get("sec-ch-ua-wow64"));
+        let ua_full_version_list =
+            header_value_to_string(headers.get("sec-ch-ua-full-version-list"));
 
         if ua.is_none()
             && ua_mobile.is_none()
@@ -414,12 +501,19 @@ impl ClientHints {
     }
 }
 
-fn header_to_string(value: Option<&axum::http::HeaderValue>) -> Option<String> {
+fn header_to_string(headers: &axum::http::HeaderMap, name: &HeaderName) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_owned())
+}
+
+fn header_value_to_string(value: Option<&axum::http::HeaderValue>) -> Option<String> {
     value.and_then(|v| v.to_str().ok().map(|s| s.to_owned()))
 }
 
 fn pick_client_ip_from_xff(headers: &axum::http::HeaderMap) -> Option<String> {
-    let xff = headers.get("x-forwarded-for")?.to_str().ok()?;
+    let xff = header_to_string(headers, &HEADER_X_FORWARDED_FOR)?;
     let mut first = None;
     for part in xff.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
         if first.is_none() {
@@ -577,6 +671,10 @@ mod tests {
         assert_eq!(metadata.region.as_deref(), Some("na"));
         assert_eq!(metadata.client_ip.as_deref(), Some("203.0.113.1"));
         assert_eq!(metadata.path, "/foo?bar=baz");
+        assert!(matches!(
+            metadata.platform,
+            Some(RequestMetadataPlatform::Cloudflare { .. })
+        ));
     }
 
     #[test]
@@ -610,6 +708,10 @@ mod tests {
         assert_eq!(parsed.worker_name, metadata.worker_name);
         assert_eq!(parsed.path, metadata.path);
         assert_eq!(parsed.raw_url, metadata.raw_url);
+        assert!(matches!(
+            parsed.platform,
+            Some(RequestMetadataPlatform::Cloudflare { .. })
+        ));
     }
 
     #[test]
@@ -663,5 +765,19 @@ mod tests {
             metadata.trace_context.as_ref().unwrap().span_id.as_deref(),
             Some("123")
         );
+        assert!(matches!(
+            metadata.platform,
+            Some(RequestMetadataPlatform::CloudRun {
+                ref service,
+                ref revision,
+                ref configuration,
+                ref project_id,
+                ref region,
+            }) if service.as_deref() == Some("svc")
+                && revision.as_deref() == Some("rev")
+                && configuration.as_deref() == Some("cfg")
+                && project_id.as_deref() == Some("proj-123")
+                && region.as_deref() == Some("us-central1")
+        ));
     }
 }
