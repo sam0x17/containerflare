@@ -25,11 +25,26 @@ impl ContainerflareRuntime {
 
 /// Serves the router with the provided configuration.
 pub async fn serve(router: Router, config: RuntimeConfig) -> Result<()> {
-    let listener = TcpListener::bind(config.bind_addr).await?;
-    tracing::info!(addr = %config.bind_addr, "containerflare listening");
+    let RuntimeConfig {
+        bind_addr,
+        platform,
+        command_endpoint,
+        command_disabled_reason,
+    } = config;
 
-    let command_client = CommandClient::connect(config.command_endpoint.clone()).await?;
-    let router = router.layer(Extension(command_client));
+    let listener = TcpListener::bind(bind_addr).await?;
+    tracing::info!(addr = %bind_addr, platform = ?platform, "containerflare listening");
+
+    let command_client = match command_endpoint {
+        Some(endpoint) => CommandClient::connect(endpoint).await?,
+        None => CommandClient::unavailable(
+            command_disabled_reason.unwrap_or_else(|| "command channel disabled".to_owned()),
+        ),
+    };
+
+    let router = router
+        .layer(Extension(command_client))
+        .layer(Extension(platform));
     let service = router.into_make_service();
 
     axum::serve(listener, service)

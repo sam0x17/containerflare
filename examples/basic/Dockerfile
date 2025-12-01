@@ -20,13 +20,17 @@ RUN rustup update stable && \
       --target x86_64-unknown-linux-musl
 
 FROM alpine:latest
+ARG PORT=8787
 WORKDIR /opt/app
 
 RUN addgroup -S containerflare && adduser -S containerflare -G containerflare
 
 COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/containerflare-basic-example /usr/local/bin/containerflare-basic
 
-EXPOSE 8787
+# Bind port is configurable via PORT (defaulting to the Cloudflare sidecar contract).
+ENV PORT=${PORT}
+EXPOSE ${PORT}
+
 USER containerflare
 ENV RUST_LOG=info \
     CF_CONTAINER_ADDR=0.0.0.0

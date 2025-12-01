@@ -2,14 +2,14 @@
 
 ## Goals
 - Provide a first-party Rust crate for building Cloudflare Containers Workers with an
-  Axum-first developer experience.
+  Axum-first developer experience while also supporting Google Cloud Run without extra glue.
 - Hide container-runtime specific details (init, I/O plumbing, request context propagation,
   command protocol).
 - Offer ergonomic abstractions for making host-environment calls (KV, D1, Queues, environment
   variables, secrets) via a thin command channel.
 - Deliver a lightweight runtime that targets Alpine/musl containers
-  (`x86_64-unknown-linux-musl`) per Cloudflare's linux/amd64 requirement for Containers, while
-  keeping the API surface flexible for future adapters.
+  (`x86_64-unknown-linux-musl`) per Cloudflare's linux/amd64 requirement for Containers and the
+  Cloud Run baseline, while keeping the API surface flexible for future adapters.
 - Keep the API surface intentionally small at 0.1.x while leaving room for future adapters
   (tower layers, typed commands, streaming bodies).
 
@@ -30,26 +30,34 @@
                            ============================
 ```
 1. `ContainerRuntime` bootstraps the process: reads config/environment, wires stdin/stdout to
-   host IPC, spawns Axum server inside the container, and translates between Cloudflare host
-   requests and Axum `Request`s.
+   host IPC, spawns Axum server inside the container, and translates between Cloudflare/Cloud Run
+   host requests and Axum `Request`s (binding to `CF_CONTAINER_*` or `PORT` automatically).
 2. `CommandClient` (in the standalone `containerflare-command` crate) pushes structured JSON commands over the same IPC channel (or TCP
-   unix-socket when available) and awaits responses.
+   unix-socket when available) and awaits responses. On platforms without a host command bus (Cloud
+   Run) the client reports `CommandError::Unavailable` immediately.
 3. Axum handlers access host capabilities via `ContainerContext`, injected as an
    extension/state, keeping handler ergonomics idiomatic.
 
 ## Modules & Responsibilities
 - `containerflare::runtime`
   - Provides `Runtime::new(Config) -> Runtime` and `Runtime::serve(router)`.
-  - Handles async executor setup (tokio) and Axum server binding (listens on 0.0.0.0:8787 by
-    default; Cloudflare sidecar proxies HTTP traffic here).
+  - Handles async executor setup (tokio) and Axum server binding (binds to `PORT` when set,
+    otherwise `CF_CONTAINER_PORT`/`0.0.0.0:8787` for the Cloudflare sidecar).
   - Manages graceful shutdown (SIGTERM/SIGINT) triggered by host container.
 - `containerflare::config`
-  - Parses config from env (e.g., `CF_CONTAINER_PORT`, `CF_CMD_SOCKET`, `CF_ENV_*`).
+  - Parses config from env (e.g., `CF_CONTAINER_PORT`, `CF_CMD_SOCKET`, `PORT`,
+    `K_SERVICE`, etc.).
   - Allows override via builder for unit tests.
+- `containerflare::platform`
+  - Detects whether the process is running under Cloudflare Containers, Google Cloud Run, or a
+    generic environment.
+  - Carries structured metadata (worker name, service/revision/configuration/project/region) that
+    gets injected into every request via Axum extensions.
 - `containerflare::context`
   - Defines `ContainerContext` struct containing request metadata + `CommandClient` handle.
     Metadata is populated from the Worker-supplied `x-containerflare-metadata` header (request
-    id, colo/region/country, client IP, etc.) with HTTP header fallbacks for local testing.
+    id, colo/region/country, client IP, etc.) or from Cloud Run headers/environment with HTTP
+    fallbacks for local testing.
   - Implements `FromRequestParts` for easy injection into Axum handlers.
 - `containerflare-command` (workspace crate re-exported by `containerflare`)
   - Owns the low-level IPC transport (stdin/stdout framing while sockets are not GA yet).
@@ -61,11 +69,12 @@
 
 ## Request Handling Flow
 1. Cloudflare worker container forwards an HTTP request to the embedded Axum server (loopback
-   HTTP or `hyper::server::conn::http1::Builder` via raw streams; MVP uses `TcpListener`).
-2. `ContainerRuntime` accepts the request, attaches metadata (worker/colo, account, request id)
-   gleaned from the Cloudflare-provided headers.
+   HTTP or `hyper::server::conn::http1::Builder` via raw streams; MVP uses `TcpListener`). On Cloud
+   Run the platform forwards traffic from the global load balancer to the container port.
+2. `ContainerRuntime` accepts the request, attaches metadata (worker/colo, account, request id,
+   Cloud Run service/revision/project, trace context, etc.) gleaned from headers/environment.
 3. Handler receives `ContainerContext` extension to talk back to host (issue commands, access
-   secrets, mutate storage).
+   secrets, mutate storage) and can branch on `ContainerContext::platform()` when necessary.
 4. Responses travel back through Axum/Hyper, and the worker container proxies them to the edge
    client.
 
@@ -77,6 +86,9 @@ re-exported by `containerflare` for convenience).
 - `CommandClient` serializes commands sequentially with flush/timeout guarantees and surfaces
   structured errors; follow-up work will add true multiplexing with per-command IDs once
   Cloudflare documents the protocol.
+- Platforms without a host bus (e.g., Cloud Run) configure the runtime with a disabled command
+  endpoint so `CommandClient` returns `CommandError::Unavailable` immediately while keeping the API
+  ergonomics consistent.
 - Future extension: feature-flagged advanced transports (shared memory, Unix sockets on Windows
   Subsystem for Linux, etc.) for faster local dev.
 
@@ -86,7 +98,9 @@ re-exported by `containerflare` for convenience).
   (`cloudflare-docs/src/content/docs/containers/platform-details/architecture.mdx:79`); crate
   exposes `bin` example as reference.
 - Provide `containerflare::main(router)` helper macro to hide tokio boilerplate.
-- Provide `examples/basic` showing builder usage plus Cloudflare-specific command invocation.
+- Provide `examples/basic` showing builder usage, Cloudflare deployment (wrangler), and Cloud Run
+  deployment (single Dockerfile + gcloud instructions) from the same codebase via local scripts
+  inside the example directory.
 
 ## Iteration Plan
 1. Implement config, runtime, and context scaffolding (MVP; ensures requests can reach Axum
